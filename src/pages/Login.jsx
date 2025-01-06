@@ -79,7 +79,7 @@ const Login = () => {
                     Revendas
                 </Typography>
                 <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
-                    Faça loginn para continuar
+                    Faça login para continuar
                 </Typography>
                 {error && (
                     <Typography variant="body2" color="error" gutterBottom>
