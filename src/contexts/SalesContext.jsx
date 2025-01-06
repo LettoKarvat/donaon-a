@@ -1,0 +1,1 @@
+// Aqui vai a lógica para vendas usando React Context.
