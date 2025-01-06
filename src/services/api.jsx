@@ -1,5 +1,8 @@
 import axios from 'axios';
 
+// Exibe no console a URL base configurada a partir das variáveis de ambiente
+console.log('Base URL:', import.meta.env.VITE_BASE_URL_API);
+
 const api = axios.create({
     baseURL: import.meta.env.VITE_BASE_URL_API,
     headers: {
