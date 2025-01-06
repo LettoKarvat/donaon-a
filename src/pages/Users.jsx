@@ -19,6 +19,8 @@ import {
     ListItem,
     DialogActions,
 } from '@mui/material';
+import { Delete, Edit, Inventory, LocalShipping } from '@mui/icons-material';
+
 import Header from '../components/Header';
 import api from '../services/api';
 import DeliveriesModal from '../components/DeliveriesModal';
@@ -35,6 +37,10 @@ const Users = () => {
     const [openAddUserModal, setOpenAddUserModal] = useState(false);
     const [newUser, setNewUser] = useState({ fullname: '', email: '', password: '' });
     const [addUserError, setAddUserError] = useState('');
+    const [openEditUserModal, setOpenEditUserModal] = useState(false);
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [editUserError, setEditUserError] = useState('');
+
 
     const fetchSellers = async () => {
         const sessionToken = localStorage.getItem('sessionToken');
@@ -55,14 +61,21 @@ const Users = () => {
                     },
                 }
             );
-            setSellers(response.data.result);
-            setFilteredSellers(response.data.result);
+
+            // Filtra apenas os revendedores que não foram deletados (isDeleted: false ou isDeleted inexistente)
+            const activeSellers = response.data.result.filter(
+                (seller) => !seller.isDeleted
+            );
+
+            setSellers(activeSellers);
+            setFilteredSellers(activeSellers);
             setLoading(false);
         } catch (err) {
             console.error('Erro ao carregar revendedores:', err.response ? err.response.data : err.message);
             setLoading(false);
         }
     };
+
 
     useEffect(() => {
         fetchSellers();
@@ -93,6 +106,80 @@ const Users = () => {
         setSelectedDeliverySeller(null);
         setOpenDeliveriesModal(false);
     };
+
+    const handleEditUser = (seller) => {
+        console.log(seller.email)
+        setSelectedUser({
+            sellerId: seller.sellerId,
+            fullname: seller.sellerName,
+            email: seller.email, // Preenche o campo de e-mail
+            password: '', // Deixe a senha vazia inicialmente
+        });
+        setOpenEditUserModal(true);
+    };
+
+
+
+    const closeEditUserModal = () => {
+        setSelectedEditSeller(null);
+        setOpenEditUserModal(false);
+    };
+
+    const handleUpdateUser = async () => {
+        if (!selectedUser.fullname || !selectedUser.email) {
+            setEditUserError('Todos os campos são obrigatórios!');
+            return;
+        }
+
+        try {
+            await api.post(
+                '/functions/update-user',
+                {
+                    userId: selectedUser.sellerId, // Enviar o ID do usuário
+                    fullname: selectedUser.fullname,
+                    email: selectedUser.email,
+                    password: selectedUser.password, // Enviar a senha se ela for preenchida
+                },
+                {
+                    headers: {
+                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                    },
+                }
+            );
+            alert('Revendedor atualizado com sucesso!');
+            setOpenEditUserModal(false);
+            setSelectedUser(null);
+            fetchSellers();
+        } catch (err) {
+            console.error('Erro ao atualizar revendedor:', err);
+            setEditUserError('Erro ao atualizar revendedor. Verifique os dados e tente novamente.');
+        }
+    };
+
+    const handleDeleteUser = async (userId) => {
+        if (!window.confirm("Tem certeza que deseja deletar este revendedor?")) {
+            return;
+        }
+
+        try {
+            await api.post(
+                '/functions/soft-delete-user',
+                { userId },
+                {
+                    headers: {
+                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                    },
+                }
+            );
+            alert('Revendedor deletado com sucesso!');
+            fetchSellers(); // Atualiza a lista de revendedores
+        } catch (err) {
+            console.error('Erro ao deletar revendedor:', err);
+            alert('Erro ao deletar revendedor. Tente novamente.');
+        }
+    };
+
+
 
     const handleReturnStock = async (productId, quantity) => {
         if (!selectedStockSeller) return;
@@ -159,18 +246,41 @@ const Users = () => {
             <Header />
 
             <Box sx={{ padding: '16px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', maxWidth: '900px', mb: 3 }}>
-                    <Typography variant="h4" sx={{ textAlign: 'center' }}>
+                <Box
+                    sx={{
+                        display: 'flex',
+                        flexDirection: { xs: 'column', sm: 'row' },
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        width: '100%',
+                        maxWidth: '900px',
+                        mb: 3,
+                        gap: 2,
+                    }}
+                >
+                    <Typography variant="h4" sx={{ textAlign: 'center', flexGrow: 1 }}>
                         Gerenciar Revendedores
                     </Typography>
                     <Button
                         variant="contained"
-                        color="primary"
+                        sx={{
+                            padding: '12px 24px',
+                            borderRadius: '12px',
+                            fontWeight: 'bold',
+                            width: { xs: '100%', sm: 'auto' },
+                            maxWidth: '300px',
+                            backgroundColor: '#FF4081',
+                            color: '#fff',
+                            boxShadow: '0px 4px 10px rgba(255, 64, 129, 0.5)',
+                        }}
                         onClick={() => setOpenAddUserModal(true)}
                     >
-                        Adicionar Revendedor
+                        + Adicionar Revendedor(a)
                     </Button>
                 </Box>
+
+
+
 
                 <TextField
                     label="Pesquisar Revendedor"
@@ -207,26 +317,48 @@ const Users = () => {
                                                 }}
                                             >
                                                 <Button
-                                                    variant="contained"
+                                                    variant="outlined"
                                                     color="primary"
                                                     fullWidth
                                                     onClick={() => handleViewStock(seller)}
+                                                    startIcon={<Inventory />}
                                                 >
                                                     Ver Estoque
                                                 </Button>
                                                 <Button
-                                                    variant="contained"
+                                                    variant="outlined"
                                                     color="secondary"
                                                     fullWidth
                                                     onClick={() => handleViewDeliveries(seller)}
+                                                    startIcon={<LocalShipping />}
                                                 >
                                                     Entregas
+                                                </Button>
+                                                <Button
+                                                    variant="outlined"
+                                                    color="primary"
+                                                    fullWidth
+                                                    onClick={() => handleEditUser(seller)}
+                                                    startIcon={<Edit />}
+                                                >
+                                                    Editar
+                                                </Button>
+                                                <Button
+                                                    variant="outlined"
+                                                    color="error"
+                                                    fullWidth
+                                                    onClick={() => handleDeleteUser(seller.sellerId)}
+                                                    startIcon={<Delete />}
+                                                >
+                                                    Deletar
                                                 </Button>
                                             </Box>
                                         </TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
+
+
                         </Table>
                     </TableContainer>
                 )}
@@ -336,6 +468,44 @@ const Users = () => {
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            <Dialog open={openEditUserModal} onClose={() => setOpenEditUserModal(false)} fullWidth maxWidth="sm">
+                <DialogTitle>Editar Revendedor</DialogTitle>
+                <DialogContent dividers>
+                    {editUserError && <Typography color="error" sx={{ mb: 2 }}>{editUserError}</Typography>}
+                    <TextField
+                        fullWidth
+                        label="Nome Completo"
+                        value={selectedUser?.fullname || ''}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, fullname: e.target.value })}
+                        sx={{ mb: 2 }}
+                    />
+                    <TextField
+                        fullWidth
+                        label="Email"
+                        type="email"
+                        value={selectedUser?.email || ''}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, email: e.target.value })}
+                        sx={{ mb: 2 }}
+                    />
+                    <TextField
+                        fullWidth
+                        label="Senha"
+                        type="password"
+                        value={selectedUser?.password || ''}
+                        onChange={(e) => setSelectedUser({ ...selectedUser, password: e.target.value })}
+                    />
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenEditUserModal(false)} color="secondary">
+                        Cancelar
+                    </Button>
+                    <Button onClick={handleUpdateUser} color="primary" variant="contained">
+                        Atualizar
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
 
             <DeliveriesModal
                 open={openDeliveriesModal}

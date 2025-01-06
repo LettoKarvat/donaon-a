@@ -24,10 +24,14 @@ const AdminDashboard = () => {
                 });
                 setTotalProducts(productsResponse.data.result.length);
 
-                const sellersResponse = await api.get('/classes/_User', {
-                    params: { where: { role: 'revendedor' } },
+                const sellersResponse = await api.post('/functions/get-total-sellers', {}, {
+                    headers: {
+                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                    },
                 });
-                setTotalSellers(sellersResponse.data.results.length);
+
+                setTotalSellers(sellersResponse.data.result.totalSellers);
+
 
                 const salesResponse = await api.get('/classes/Sales');
                 const salesData = salesResponse.data.results;
@@ -40,6 +44,7 @@ const AdminDashboard = () => {
                 setLoading(false);
             }
         };
+
 
         fetchAdminData();
     }, []);
