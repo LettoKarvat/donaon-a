@@ -77,12 +77,15 @@ const Products = () => {
                 });
 
                 if (Array.isArray(response.data.result)) {
-                    setResellers(response.data.result);
+                    // Filtrar apenas revendedores que não estão deletados
+                    const activeResellers = response.data.result.filter(reseller => !reseller.isDeleted);
+                    setResellers(activeResellers);
                 }
             } catch (error) {
                 console.error('Erro ao carregar revendedores:', error);
             }
         };
+
 
         fetchProducts();
         fetchResellers();

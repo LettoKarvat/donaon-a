@@ -8,10 +8,10 @@ const Login = () => {
     const [error, setError] = useState('');
 
     const handleLogin = async (e) => {
-        e.preventDefault(); // Evita o comportamento padrão do submit do formulário
+        e.preventDefault();
         try {
             const response = await api.post('/functions/login', {
-                email,
+                email: email.trim().toLowerCase(), // Normaliza o email
                 password,
             });
 
