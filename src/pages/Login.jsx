@@ -64,7 +64,7 @@ const Login = () => {
                         fontSize: '2.5rem',
                     }}
                 >
-                    Dona Onça Gestão
+                    Donna Onça Gestão
                 </Typography>
                 <Typography
                     align="center"

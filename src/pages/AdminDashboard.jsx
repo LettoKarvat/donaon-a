@@ -83,7 +83,7 @@ const AdminDashboard = () => {
                         mb: 2,
                     }}
                 >
-                    Dona Onça Gestão
+                    Donna Onça Gestão
                 </Typography>
                 <Typography variant="h5" sx={{ mb: 4 }}>
                     Dashboard do Administrador

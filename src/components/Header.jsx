@@ -39,7 +39,7 @@ const Header = () => {
                         flexGrow: 1,
                     }}
                 >
-                    Dona Onça
+                    Donna Onça
                 </Typography>
                 <Box>
                     <Button
