@@ -18,8 +18,11 @@ import {
     List,
     ListItem,
     DialogActions,
+    MenuItem,
+    Select,
+    IconButton
 } from '@mui/material';
-import { Delete, Edit, Inventory, LocalShipping } from '@mui/icons-material';
+import { Delete, Edit, Inventory, LocalShipping, SortByAlpha, TrendingUp } from '@mui/icons-material';
 
 import Header from '../components/Header';
 import api from '../services/api';
@@ -40,6 +43,11 @@ const Users = () => {
     const [openEditUserModal, setOpenEditUserModal] = useState(false);
     const [selectedUser, setSelectedUser] = useState(null);
     const [editUserError, setEditUserError] = useState('');
+    const [currentSort, setCurrentSort] = useState('name');
+    const [sortOrderName, setSortOrderName] = useState('asc'); // 'asc' = A-Z, 'desc' = Z-A
+    const [sortOrderSales, setSortOrderSales] = useState('asc'); // 'asc' = menor->maior, 'desc' = maior->menor
+
+
 
 
     const fetchSellers = async () => {
@@ -62,12 +70,11 @@ const Users = () => {
                 }
             );
 
-            // Filtra apenas os revendedores que não foram deletados (isDeleted: false ou isDeleted inexistente)
             const activeSellers = response.data.result.filter(
                 (seller) => !seller.isDeleted
             );
 
-            setSellers(activeSellers);
+            setSellers(activeSellers);       // Apenas define a lista original
             setFilteredSellers(activeSellers);
             setLoading(false);
         } catch (err) {
@@ -75,6 +82,8 @@ const Users = () => {
             setLoading(false);
         }
     };
+
+
 
 
     useEffect(() => {
@@ -116,6 +125,17 @@ const Users = () => {
             password: '', // Deixe a senha vazia inicialmente
         });
         setOpenEditUserModal(true);
+    };
+
+
+    const toggleSortName = () => {
+        setCurrentSort('name');
+        setSortOrderName((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    };
+
+    const toggleSortSales = () => {
+        setCurrentSort('sales');
+        setSortOrderSales((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     };
 
 
@@ -181,6 +201,28 @@ const Users = () => {
 
 
 
+    const toggleSortOrder = () => {
+        setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    };
+
+    const sortSellers = (sellersList) => {
+        return [...sellersList].sort((a, b) => {
+            if (sortOrderName !== null) {
+                return sortOrderName === 'asc'
+                    ? a.sellerName.localeCompare(b.sellerName)
+                    : b.sellerName.localeCompare(a.sellerName);
+            } else {
+                return sortOrderSales === 'desc'
+                    ? b.salesCount - a.salesCount
+                    : a.salesCount - b.salesCount;
+            }
+        });
+    };
+
+
+
+
+
     const handleReturnStock = async (productId, quantity) => {
         if (!selectedStockSeller) return;
 
@@ -217,11 +259,14 @@ const Users = () => {
         const term = e.target.value.toLowerCase();
         setSearchTerm(term);
         setFilteredSellers(
-            sellers.filter((seller) =>
-                seller.sellerName?.toLowerCase().includes(term)
+            sortSellers(
+                sellers.filter((seller) =>
+                    seller.sellerName?.toLowerCase().includes(term)
+                )
             )
         );
     };
+
 
     const handleAddUser = async () => {
         if (!newUser.fullname || !newUser.email || !newUser.password) {
@@ -282,14 +327,34 @@ const Users = () => {
 
 
 
-                <TextField
-                    label="Pesquisar Revendedor"
-                    variant="outlined"
-                    fullWidth
-                    sx={{ maxWidth: '900px', mb: 3 }}
-                    value={searchTerm}
-                    onChange={handleSearch}
-                />
+
+
+                <Box
+                    sx={{
+                        display: 'flex',
+                        flexDirection: { xs: 'column', sm: 'row' },
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                        maxWidth: '900px',
+                        mb: 3,
+                        gap: 1,
+                    }}
+                >
+                    <TextField
+                        label="Pesquisar Revendedor"
+                        variant="outlined"
+                        fullWidth
+                        value={searchTerm}
+                        onChange={handleSearch}
+                        sx={{ flex: 1 }}
+                    />
+
+
+
+
+                </Box>
+
 
                 {loading ? (
                     <CircularProgress />
@@ -298,64 +363,95 @@ const Users = () => {
                         <Table>
                             <TableHead>
                                 <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold' }}>Revendedor</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Número de Vendas</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Ações</TableCell>
+                                    <TableCell
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={toggleSortName}
+                                    >
+                                        Revendedor {currentSort === 'name' && (sortOrderName === 'asc' ? '🔼' : '🔽')}
+                                    </TableCell>
+                                    <TableCell
+                                        align="center"
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={toggleSortSales}
+                                    >
+                                        Número de Vendas {currentSort === 'sales' && (sortOrderSales === 'asc' ? '🔼' : '🔽')}
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>
+                                        Ações
+                                    </TableCell>
                                 </TableRow>
                             </TableHead>
+
+
                             <TableBody>
-                                {filteredSellers.map((seller) => (
-                                    <TableRow key={seller.sellerId}>
-                                        <TableCell>{seller.sellerName || 'Sem nome'}</TableCell>
-                                        <TableCell align="center">{seller.salesCount}</TableCell>
-                                        <TableCell align="center">
-                                            <Box
-                                                sx={{
-                                                    display: 'flex',
-                                                    flexDirection: { xs: 'column', sm: 'row' },
-                                                    gap: 1,
-                                                }}
-                                            >
-                                                <Button
-                                                    variant="outlined"
-                                                    color="primary"
-                                                    fullWidth
-                                                    onClick={() => handleViewStock(seller)}
-                                                    startIcon={<Inventory />}
+                                {[...filteredSellers]
+                                    .sort((a, b) => {
+                                        if (currentSort === 'name') {
+                                            return sortOrderName === 'asc'
+                                                ? a.sellerName.localeCompare(b.sellerName)
+                                                : b.sellerName.localeCompare(a.sellerName);
+                                        } else {
+                                            return sortOrderSales === 'asc'
+                                                ? a.salesCount - b.salesCount
+                                                : b.salesCount - a.salesCount;
+                                        }
+                                    })
+                                    .map((seller) => (
+                                        <TableRow key={seller.sellerId}>
+                                            <TableCell>{seller.sellerName || 'Sem nome'}</TableCell>
+                                            <TableCell align="center">{seller.salesCount}</TableCell>
+                                            <TableCell align="center">
+                                                <Box
+                                                    sx={{
+                                                        display: 'flex',
+                                                        flexDirection: { xs: 'column', sm: 'row' },
+                                                        gap: 1,
+                                                    }}
                                                 >
-                                                    Ver Estoque
-                                                </Button>
-                                                <Button
-                                                    variant="outlined"
-                                                    color="secondary"
-                                                    fullWidth
-                                                    onClick={() => handleViewDeliveries(seller)}
-                                                    startIcon={<LocalShipping />}
-                                                >
-                                                    Entregas
-                                                </Button>
-                                                <Button
-                                                    variant="outlined"
-                                                    color="primary"
-                                                    fullWidth
-                                                    onClick={() => handleEditUser(seller)}
-                                                    startIcon={<Edit />}
-                                                >
-                                                    Editar
-                                                </Button>
-                                                <Button
-                                                    variant="outlined"
-                                                    color="error"
-                                                    fullWidth
-                                                    onClick={() => handleDeleteUser(seller.sellerId)}
-                                                    startIcon={<Delete />}
-                                                >
-                                                    Deletar
-                                                </Button>
-                                            </Box>
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
+                                                    <Button
+                                                        variant="outlined"
+                                                        color="primary"
+                                                        fullWidth
+                                                        onClick={() => handleViewStock(seller)}
+                                                        startIcon={<Inventory />}
+                                                    >
+                                                        Ver Estoque
+                                                    </Button>
+                                                    <Button
+                                                        variant="outlined"
+                                                        color="secondary"
+                                                        fullWidth
+                                                        onClick={() => handleViewDeliveries(seller)}
+                                                        startIcon={<LocalShipping />}
+                                                    >
+                                                        Entregas
+                                                    </Button>
+                                                    <Button
+                                                        variant="outlined"
+                                                        color="primary"
+                                                        fullWidth
+                                                        onClick={() => handleEditUser(seller)}
+                                                        startIcon={<Edit />}
+                                                    >
+                                                        Editar
+                                                    </Button>
+                                                    <Button
+                                                        variant="outlined"
+                                                        color="error"
+                                                        fullWidth
+                                                        onClick={() => handleDeleteUser(seller.sellerId)}
+                                                        startIcon={<Delete />}
+                                                    >
+                                                        Deletar
+                                                    </Button>
+                                                </Box>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+
+
+
+
                             </TableBody>
 
 
