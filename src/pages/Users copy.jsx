@@ -23,7 +23,6 @@ import {
     IconButton
 } from '@mui/material';
 import { Delete, Edit, Inventory, LocalShipping, SortByAlpha, TrendingUp } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
 
 import Header from '../components/Header';
 import api from '../services/api';
@@ -61,10 +60,8 @@ const Users = () => {
 
         try {
             setLoading(true);
-
-            // Chamar a função get-resellers-summary para obter os revendedores
-            const resellersResponse = await api.post(
-                '/functions/get-resellers-summary',
+            const response = await api.post(
+                '/functions/list-sellers-with-sales',
                 {},
                 {
                     headers: {
@@ -73,51 +70,25 @@ const Users = () => {
                 }
             );
 
-            const resellers = resellersResponse.data.result;
-
-            // Chamar a função get-admin-reports para obter as vendas
-            const reportsResponse = await api.post(
-                '/functions/get-admin-reports',
-                {},
-                {
-                    headers: {
-                        'X-Parse-Session-Token': sessionToken,
-                    },
-                }
+            const activeSellers = response.data.result.filter(
+                (seller) => !seller.isDeleted
             );
 
-            const reports = reportsResponse.data.result;
-
-            // Combinar os dados de revendedores com os dados de vendas
-            const activeSellers = resellers.map((reseller) => {
-                const report = reports[reseller.fullname];
-                return {
-                    sellerName: reseller.fullname,
-                    sellerId: reseller.resellerId,
-                    salesCount: report ? report.totalSales : 0,
-                    email: reseller.email,
-                };
-            });
-
-            setSellers(activeSellers);
+            setSellers(activeSellers);       // Apenas define a lista original
             setFilteredSellers(activeSellers);
             setLoading(false);
         } catch (err) {
-            console.error(
-                'Erro ao carregar revendedores:',
-                err.response ? err.response.data : err.message
-            );
+            console.error('Erro ao carregar revendedores:', err.response ? err.response.data : err.message);
             setLoading(false);
         }
     };
 
 
+
+
     useEffect(() => {
         fetchSellers();
     }, []);
-
-
-    const navigate = useNavigate();
 
     const handleViewStock = (seller) => {
         setSelectedStockSeller({
@@ -167,6 +138,11 @@ const Users = () => {
         setSortOrderSales((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     };
 
+
+    const closeEditUserModal = () => {
+        setSelectedEditSeller(null);
+        setOpenEditUserModal(false);
+    };
 
     const handleUpdateUser = async () => {
         if (!selectedUser.fullname || !selectedUser.email) {
@@ -222,6 +198,11 @@ const Users = () => {
         }
     };
 
+
+
+    const toggleSortOrder = () => {
+        setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    };
 
     const sortSellers = (sellersList) => {
         return [...sellersList].sort((a, b) => {
@@ -368,9 +349,39 @@ const Users = () => {
                         sx={{ flex: 1 }}
                     />
 
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                        <Button
+                            onClick={toggleSortName}
+                            sx={{
+                                minWidth: 'auto',
+                                padding: '6px',
+                                borderRadius: '50%',
+                                backgroundColor: 'transparent',
+                                boxShadow: 'none',
+                                '&:hover': {
+                                    backgroundColor: '#f0f0f0',
+                                },
+                            }}
+                        >
+                            {sortOrderName === 'asc' ? 'A-Z' : 'Z-A'}
+                        </Button>
 
-
-
+                        <Button
+                            onClick={toggleSortSales}
+                            sx={{
+                                minWidth: 'auto',
+                                padding: '6px',
+                                borderRadius: '50%',
+                                backgroundColor: 'transparent',
+                                boxShadow: 'none',
+                                '&:hover': {
+                                    backgroundColor: '#f0f0f0',
+                                },
+                            }}
+                        >
+                            {sortOrderSales === 'asc' ? 'Menor->Maior' : 'Maior->Menor'}
+                        </Button>
+                    </Box>
                 </Box>
 
 
@@ -381,34 +392,21 @@ const Users = () => {
                         <Table>
                             <TableHead>
                                 <TableRow>
-                                    <TableCell
-                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
-                                        onClick={toggleSortName}
-                                    >
-                                        Revendedor {currentSort === 'name' && (sortOrderName === 'asc' ? '🔼' : '🔽')}
-                                    </TableCell>
-                                    <TableCell
-                                        align="center"
-                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
-                                        onClick={toggleSortSales}
-                                    >
-                                        Número de Vendas {currentSort === 'sales' && (sortOrderSales === 'asc' ? '🔼' : '🔽')}
-                                    </TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                                        Ações
-                                    </TableCell>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>Revendedor</TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Número de Vendas</TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Ações</TableCell>
                                 </TableRow>
                             </TableHead>
-
-
                             <TableBody>
                                 {[...filteredSellers]
                                     .sort((a, b) => {
                                         if (currentSort === 'name') {
+                                            // Ordenar pelo nome
                                             return sortOrderName === 'asc'
                                                 ? a.sellerName.localeCompare(b.sellerName)
                                                 : b.sellerName.localeCompare(a.sellerName);
                                         } else {
+                                            // Ordenar pelas vendas
                                             return sortOrderSales === 'asc'
                                                 ? a.salesCount - b.salesCount
                                                 : b.salesCount - a.salesCount;
@@ -416,12 +414,7 @@ const Users = () => {
                                     })
                                     .map((seller) => (
                                         <TableRow key={seller.sellerId}>
-                                            <TableCell
-                                                sx={{ fontWeight: 'bold', cursor: 'pointer', color: 'blue' }}
-                                                onClick={() => navigate(`/users/${seller.sellerId}`)}
-                                            >
-                                                {seller.sellerName || 'Sem nome'}
-                                            </TableCell>
+                                            <TableCell>{seller.sellerName || 'Sem nome'}</TableCell>
                                             <TableCell align="center">{seller.salesCount}</TableCell>
                                             <TableCell align="center">
                                                 <Box
@@ -471,8 +464,6 @@ const Users = () => {
                                             </TableCell>
                                         </TableRow>
                                     ))}
-
-
 
 
                             </TableBody>

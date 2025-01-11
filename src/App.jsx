@@ -13,6 +13,8 @@ import Reports from './pages/Reports';
 import Users from './pages/Users'; // Importando o componente de gerenciar revendedores
 import NotFound from './pages/NotFound';
 import PrivateRoute from './components/PrivateRoute';
+import SellerDetails from './pages/SellerDetails';
+
 import ResellerDetails from './pages/ResellerDetails';
 
 const App = () => {
@@ -28,25 +30,25 @@ const App = () => {
                     <Route
                         path="/dashboard"
                         element={
-                            <PrivateRoute element={<Dashboard />} allowedRoles={['revendedor']} />
+                            <PrivateRoute element={<Dashboard />} allowedRoles={["revendedor"]} />
                         }
                     />
                     <Route
                         path="/stock"
                         element={
-                            <PrivateRoute element={<CurrentStock />} allowedRoles={['revendedor']} />
+                            <PrivateRoute element={<CurrentStock />} allowedRoles={["revendedor"]} />
                         }
                     />
                     <Route
                         path="/sales-history"
                         element={
-                            <PrivateRoute element={<SalesHistory />} allowedRoles={['revendedor']} />
+                            <PrivateRoute element={<SalesHistory />} allowedRoles={["revendedor"]} />
                         }
                     />
                     <Route
                         path="/new-sale"
                         element={
-                            <PrivateRoute element={<NewSale />} allowedRoles={['revendedor']} />
+                            <PrivateRoute element={<NewSale />} allowedRoles={["revendedor"]} />
                         }
                     />
 
@@ -54,23 +56,28 @@ const App = () => {
                     <Route
                         path="/admin-dashboard"
                         element={
-                            <PrivateRoute element={<AdminDashboard />} allowedRoles={['admin']} />
+                            <PrivateRoute element={<AdminDashboard />} allowedRoles={["admin"]} />
                         }
                     />
                     <Route
                         path="/products"
-                        element={<PrivateRoute element={<Products />} allowedRoles={['admin']} />}
+                        element={<PrivateRoute element={<Products />} allowedRoles={["admin"]} />}
                     />
                     <Route
                         path="/reports"
-                        element={<PrivateRoute element={<Reports />} allowedRoles={['admin']} />}
+                        element={<PrivateRoute element={<Reports />} allowedRoles={["admin"]} />}
                     />
                     <Route
                         path="/users" // Rota para gerenciar os revendedores
-                        element={<PrivateRoute element={<Users />} allowedRoles={['admin']} />}
+                        element={<PrivateRoute element={<Users />} allowedRoles={["admin"]} />}
                     />
+
                     <Route path="/admin/reports/:resellerId" element={<ResellerDetails />} />
 
+                    <Route
+                        path="/users/:sellerId" // Rota para detalhes do revendedor
+                        element={<PrivateRoute element={<SellerDetails />} allowedRoles={["admin"]} />}
+                    />
 
                     {/* Página de rota inexistente */}
                     <Route path="*" element={<NotFound />} />
