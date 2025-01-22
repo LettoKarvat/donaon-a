@@ -118,17 +118,59 @@ const Users = () => {
 
 
     const navigate = useNavigate();
+    const fetchResellerStock = async (resellerId) => {
+        const sessionToken = localStorage.getItem("sessionToken");
 
-    const handleViewStock = (seller) => {
-        setSelectedStockSeller({
-            ...seller,
-            stockInput: Object.keys(seller.stock).reduce((acc, productId) => {
-                acc[productId] = 0;
-                return acc;
-            }, {}),
-        });
-        setOpenStockModal(true);
+        try {
+            const response = await api.post(
+                "/functions/get-reseller-stock", // 🔹 Nova função para admins
+                { resellerId },
+                {
+                    headers: {
+                        "X-Parse-Session-Token": sessionToken,
+                    },
+                }
+            );
+
+            console.log("Estoque recebido:", response.data.result); // Depuração
+
+            return response.data.result; // Retorna o estoque
+        } catch (error) {
+            console.error("Erro ao buscar estoque do revendedor:", error);
+            return [];
+        }
     };
+
+
+
+    const handleViewStock = async (seller) => {
+        try {
+            const stock = await fetchResellerStock(seller.sellerId);
+
+            if (!stock || stock.length === 0) {
+                alert("Este revendedor não possui estoque disponível.");
+                return;
+            }
+
+            setSelectedStockSeller({
+                ...seller,
+                stock,
+                stockInput: stock.reduce((acc, product) => {
+                    acc[product.productId] = 0;
+                    return acc;
+                }, {}),
+            });
+
+            setOpenStockModal(true);
+        } catch (error) {
+            console.error("Erro ao buscar estoque:", error);
+            alert("Erro ao buscar estoque.");
+        }
+    };
+
+
+
+
 
     const handleViewDeliveries = (seller) => {
         setSelectedDeliverySeller(seller);
@@ -200,27 +242,44 @@ const Users = () => {
     };
 
     const handleDeleteUser = async (userId) => {
+        console.log("Tentando deletar usuário:", userId); // Depuração
+
         if (!window.confirm("Tem certeza que deseja deletar este revendedor?")) {
             return;
         }
 
+        const sessionToken = localStorage.getItem("sessionToken");
+
+        if (!sessionToken) {
+            alert("Token de sessão não encontrado!");
+            return;
+        }
+
         try {
-            await api.post(
-                '/functions/soft-delete-user',
+            const response = await api.post(
+                "/functions/soft-delete-user",
                 { userId },
                 {
                     headers: {
-                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                        "X-Parse-Session-Token": sessionToken,
                     },
                 }
             );
-            alert('Revendedor deletado com sucesso!');
-            fetchSellers(); // Atualiza a lista de revendedores
+
+            console.log("Resposta da API:", response.data); // Depuração
+
+            if (response.data.success) {
+                alert("Revendedor marcado como deletado!");
+                fetchSellers(); // Atualiza a lista de revendedores
+            } else {
+                alert("Erro ao deletar revendedor.");
+            }
         } catch (err) {
-            console.error('Erro ao deletar revendedor:', err);
-            alert('Erro ao deletar revendedor. Tente novamente.');
+            console.error("Erro ao deletar revendedor:", err);
+            alert("Erro ao deletar revendedor. Tente novamente.");
         }
     };
+
 
 
     const sortSellers = (sellersList) => {
@@ -242,6 +301,7 @@ const Users = () => {
 
 
     const handleReturnStock = async (productId, quantity) => {
+        console.log("Chamando handleReturnStock:", productId, quantity);
         if (!selectedStockSeller) return;
 
         const sessionToken = localStorage.getItem('sessionToken');
@@ -490,9 +550,9 @@ const Users = () => {
                 <DialogContent dividers>
                     {selectedStockSeller?.stock ? (
                         <List sx={{ padding: 0 }}>
-                            {Object.entries(selectedStockSeller.stock).map(([productId, productData]) => (
+                            {selectedStockSeller.stock.map((product) => (
                                 <Paper
-                                    key={productId}
+                                    key={product.productId}
                                     elevation={3}
                                     sx={{
                                         padding: '16px',
@@ -507,27 +567,27 @@ const Users = () => {
                                 >
                                     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
                                         <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                                            {productData.productName}
+                                            {product.productName}
                                         </Typography>
                                         <Typography variant="body2" sx={{ mb: 1 }}>
-                                            Quantidade: {productData.quantity}
+                                            Quantidade: {product.quantity}
                                         </Typography>
                                         <TextField
                                             type="number"
                                             label="Quantidade a devolver"
                                             size="small"
                                             sx={{ maxWidth: '150px' }}
-                                            value={selectedStockSeller.stockInput[productId] || ''}
+                                            value={selectedStockSeller.stockInput[product.productId] || ''}
                                             onChange={(e) => {
                                                 const inputQuantity = Math.min(
                                                     parseInt(e.target.value, 10) || 0,
-                                                    productData.quantity
+                                                    product.quantity
                                                 );
                                                 setSelectedStockSeller((prev) => ({
                                                     ...prev,
                                                     stockInput: {
                                                         ...prev.stockInput,
-                                                        [productId]: inputQuantity,
+                                                        [product.productId]: inputQuantity,
                                                     },
                                                 }));
                                             }}
@@ -537,8 +597,16 @@ const Users = () => {
                                         variant="contained"
                                         color="secondary"
                                         sx={{ mt: { xs: 2, sm: 0 }, width: { xs: '100%', sm: 'auto' } }}
-                                        onClick={() => handleReturnStock(productId, selectedStockSeller.stockInput[productId] || 0)}
-                                        disabled={!selectedStockSeller.stockInput[productId] || selectedStockSeller.stockInput[productId] <= 0}
+                                        onClick={() =>
+                                            handleReturnStock(
+                                                product.productId,
+                                                selectedStockSeller.stockInput[product.productId] || 0
+                                            )
+                                        }
+                                        disabled={
+                                            !selectedStockSeller.stockInput[product.productId] ||
+                                            selectedStockSeller.stockInput[product.productId] <= 0
+                                        }
                                     >
                                         Devolver
                                     </Button>
@@ -550,6 +618,7 @@ const Users = () => {
                     )}
                 </DialogContent>
             </Dialog>
+
 
             <Dialog open={openAddUserModal} onClose={() => setOpenAddUserModal(false)} fullWidth maxWidth="sm">
                 <DialogTitle>Adicionar Revendedor</DialogTitle>
@@ -631,7 +700,17 @@ const Users = () => {
                 onClose={closeDeliveriesModal}
                 selectedSeller={selectedDeliverySeller}
             />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
         </Box>
+
     );
 };
 
