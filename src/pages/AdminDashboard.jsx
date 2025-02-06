@@ -17,25 +17,37 @@ const AdminDashboard = () => {
             try {
                 setLoading(true);
 
-                const productsResponse = await api.post('/functions/list-active-products', {}, {
-                    headers: {
-                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
-                    },
-                });
+                // 1. Obter produtos ativos
+                const productsResponse = await api.post(
+                    '/functions/list-active-products',
+                    {},
+                    {
+                        headers: {
+                            'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                        },
+                    }
+                );
                 setTotalProducts(productsResponse.data.result.length);
 
-                const sellersResponse = await api.post('/functions/get-total-sellers', {}, {
-                    headers: {
-                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
-                    },
-                });
-
+                // 2. Obter quantidade total de revendedores
+                const sellersResponse = await api.post(
+                    '/functions/get-total-sellers',
+                    {},
+                    {
+                        headers: {
+                            'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                        },
+                    }
+                );
                 setTotalSellers(sellersResponse.data.result.totalSellers);
 
-
-                const salesResponse = await api.get('/classes/Sales');
+                // 3. Obter quantidade total de produtos vendidos (buscando Sales com limit=10000)
+                const salesResponse = await api.get('/classes/Sales?limit=10000');
                 const salesData = salesResponse.data.results;
-                const totalProductsSold = salesData.reduce((sum, sale) => sum + sale.quantitySold, 0);
+                const totalProductsSold = salesData.reduce(
+                    (sum, sale) => sum + (sale.quantitySold || 0),
+                    0
+                );
                 setTotalSales(totalProductsSold);
 
                 setLoading(false);
@@ -44,7 +56,6 @@ const AdminDashboard = () => {
                 setLoading(false);
             }
         };
-
 
         fetchAdminData();
     }, []);
