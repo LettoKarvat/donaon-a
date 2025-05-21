@@ -1,5 +1,5 @@
-// Reports.jsx
-import React, { useEffect, useState } from 'react';
+// src/pages/Reports.jsx
+import React, { useEffect, useState, useMemo } from 'react';
 
 // dayjs + isBetween para filtrar por intervalo de datas
 import dayjs from 'dayjs';
@@ -42,14 +42,7 @@ const AdminReports = () => {
     const [startDate, setStartDate] = useState(dayjs().startOf('month'));
     const [endDate, setEndDate] = useState(dayjs());
 
-    // Estado para paginação por revendedor:
-    //   pageState = {
-    //     [resellerId]: {
-    //       page: number,
-    //       rowsPerPage: number
-    //     },
-    //     ...
-    //   }
+    // Estado de paginação por revendedor
     const [pageState, setPageState] = useState({});
 
     const navigate = useNavigate();
@@ -63,17 +56,13 @@ const AdminReports = () => {
 
         try {
             setLoading(true);
-            const response = await api.post(
+            const { data } = await api.post(
                 '/functions/get-admin-reports',
                 {},
-                {
-                    headers: {
-                        'X-Parse-Session-Token': sessionToken,
-                    },
-                }
+                { headers: { 'X-Parse-Session-Token': sessionToken } },
             );
-            setReports(response.data.result || {});
-            setFilteredReports(response.data.result || {});
+            setReports(data.result || {});
+            setFilteredReports(data.result || {});
             setLoading(false);
         } catch (err) {
             console.error('Erro ao buscar relatórios:', err);
@@ -87,8 +76,8 @@ const AdminReports = () => {
     }, []);
 
     // Calcula total de vendas e receita para o período selecionado
-    const calculateTotalsForPeriod = (salesDetails) => {
-        return salesDetails.reduce(
+    const calculateTotalsForPeriod = (salesDetails) =>
+        salesDetails.reduce(
             (totals, sale) => {
                 const saleDate = dayjs(sale.saleDate.iso);
                 if (saleDate.isBetween(startDate, endDate, 'day', '[]')) {
@@ -97,9 +86,8 @@ const AdminReports = () => {
                 }
                 return totals;
             },
-            { totalSales: 0, totalRevenue: 0 }
+            { totalSales: 0, totalRevenue: 0 },
         );
-    };
 
     // Aplica a busca (searchTerm) e o intervalo de datas (startDate/endDate)
     const applyFilters = (term, newStartDate, newEndDate) => {
@@ -109,69 +97,62 @@ const AdminReports = () => {
                     const saleDate = dayjs(sale.saleDate.iso);
                     return saleDate.isBetween(newStartDate, newEndDate, 'day', '[]');
                 });
-
-                acc[resellerName] = {
-                    ...report,
-                    salesDetails: filteredSales,
-                };
+                acc[resellerName] = { ...report, salesDetails: filteredSales };
             }
             return acc;
         }, {});
-
         setFilteredReports(filtered);
     };
 
-    // Lida com a mudança no campo de busca
+    // Handlers de busca e data
     const handleSearch = (e) => {
         const term = e.target.value;
         setSearchTerm(term);
         applyFilters(term, startDate, endDate);
     };
-
-    // Lida com a mudança da data inicial
     const handleStartDateChange = (date) => {
         setStartDate(date);
         applyFilters(searchTerm, date, endDate);
     };
-
-    // Lida com a mudança da data final
     const handleEndDateChange = (date) => {
         setEndDate(date);
         applyFilters(searchTerm, startDate, date);
     };
 
-    // Navega para a tela de detalhes do revendedor
-    const handleViewDetails = (resellerId) => {
-        navigate(`/admin/reports/${resellerId}`);
-    };
+    // Navegar para detalhes
+    const handleViewDetails = (resellerId) => navigate(`/admin/reports/${resellerId}`);
 
-    // Atualiza o estado de paginação (page) de cada revendedor individualmente
-    const handleChangePage = (resellerId, newPage) => {
+    // Paginação individual
+    const handleChangePage = (resellerId, newPage) =>
         setPageState((prev) => ({
             ...prev,
-            [resellerId]: {
-                ...prev[resellerId],
-                page: newPage,
-            },
+            [resellerId]: { ...prev[resellerId], page: newPage },
         }));
-    };
-
-    // Atualiza o estado de paginação (rowsPerPage) de cada revendedor individualmente
-    const handleChangeRowsPerPage = (resellerId, newRows) => {
+    const handleChangeRowsPerPage = (resellerId, newRows) =>
         setPageState((prev) => ({
             ...prev,
-            [resellerId]: {
-                page: 0, // volta pra página 0 ao trocar o tamanho
-                rowsPerPage: parseInt(newRows, 10),
-            },
+            [resellerId]: { page: 0, rowsPerPage: parseInt(newRows, 10) },
         }));
-    };
+
+    // ----------- NOVO: ordenar por total de vendas (desc) ---------------
+    const sortedResellers = useMemo(() => {
+        return Object.entries(filteredReports)
+            .map(([name, rep]) => {
+                const { totalSales, totalRevenue } = calculateTotalsForPeriod(rep.salesDetails);
+                return { name, rep, totalSales, totalRevenue };
+            })
+            .sort((a, b) => {
+                if (b.totalSales === a.totalSales) return a.name.localeCompare(b.name);
+                return b.totalSales - a.totalSales;
+            });
+    }, [filteredReports, startDate, endDate]);
+    // --------------------------------------------------------------------
 
     return (
         <LocalizationProvider dateAdapter={AdapterDayjs}>
             <Box sx={{ minHeight: '100vh', backgroundColor: '#f5f5f5', display: 'flex', flexDirection: 'column' }}>
                 <Header />
-                <Box sx={{ padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Typography variant="h4" sx={{ mb: 4, textAlign: 'center' }}>
                         Relatório de Vendas (Administrador)
                     </Typography>
@@ -181,61 +162,38 @@ const AdminReports = () => {
                     ) : error ? (
                         <Alert severity="error">{error}</Alert>
                     ) : (
-                        <Paper sx={{ padding: '16px', width: '100%', maxWidth: '900px' }}>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '16px', mb: 3 }}>
-                                <TextField
-                                    label="Buscar Revendedor"
-                                    fullWidth
-                                    value={searchTerm}
-                                    onChange={handleSearch}
-                                />
-                                <DatePicker
-                                    label="Data Início"
-                                    value={startDate}
-                                    onChange={handleStartDateChange}
-                                    format="DD/MM/YYYY"
-                                />
-                                <DatePicker
-                                    label="Data Fim"
-                                    value={endDate}
-                                    onChange={handleEndDateChange}
-                                    format="DD/MM/YYYY"
-                                />
+                        <Paper sx={{ p: 2, width: '100%', maxWidth: 900 }}>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                                <TextField label="Buscar Revendedor" fullWidth value={searchTerm} onChange={handleSearch} />
+                                <DatePicker label="Data Início" value={startDate} onChange={handleStartDateChange} format="DD/MM/YYYY" />
+                                <DatePicker label="Data Fim" value={endDate} onChange={handleEndDateChange} format="DD/MM/YYYY" />
                             </Box>
 
-                            {Object.entries(filteredReports).map(([resellerName, report]) => {
+                            {sortedResellers.map(({ name: resellerName, rep: report, totalSales, totalRevenue }) => {
                                 const resellerId = report.resellerId;
-                                // Calcula total de vendas e receita para o intervalo
-                                const { totalSales, totalRevenue } = calculateTotalsForPeriod(report.salesDetails);
-
-                                // Obter a página e o rowsPerPage atuais do estado
                                 const { page = 0, rowsPerPage = 10 } = pageState[resellerId] || {};
 
-                                // Paginação: slice nos salesDetails
-                                const startIndex = page * rowsPerPage;
-                                const endIndex = startIndex + rowsPerPage;
-                                const paginatedSales = report.salesDetails.slice(startIndex, endIndex);
+                                const startIdx = page * rowsPerPage;
+                                const paginatedSales = report.salesDetails.slice(startIdx, startIdx + rowsPerPage);
 
                                 return (
-                                    <Box key={resellerName} sx={{ marginBottom: '32px' }}>
+                                    <Box key={resellerName} sx={{ mb: 4 }}>
                                         <Typography variant="h6" gutterBottom>
                                             {resellerName}
                                         </Typography>
+
                                         <Typography variant="body1">
                                             <strong>Total de Vendas:</strong>{' '}
-                                            <Button
-                                                variant="text"
-                                                color="primary"
-                                                onClick={() => handleViewDetails(report.resellerId)}
-                                            >
+                                            <Button variant="text" color="primary" onClick={() => handleViewDetails(resellerId)}>
                                                 {totalSales}
                                             </Button>
                                         </Typography>
+
                                         <Typography variant="body1">
                                             <strong>Receita Total:</strong> R${totalRevenue.toFixed(2)}
                                         </Typography>
 
-                                        <TableContainer component={Paper} sx={{ marginTop: '16px' }}>
+                                        <TableContainer component={Paper} sx={{ mt: 2 }}>
                                             <Table>
                                                 <TableHead>
                                                     <TableRow>
@@ -246,8 +204,8 @@ const AdminReports = () => {
                                                     </TableRow>
                                                 </TableHead>
                                                 <TableBody>
-                                                    {paginatedSales.map((sale, index) => (
-                                                        <TableRow key={index}>
+                                                    {paginatedSales.map((sale, idx) => (
+                                                        <TableRow key={idx}>
                                                             <TableCell>{sale.productName}</TableCell>
                                                             <TableCell align="center">{sale.quantitySold}</TableCell>
                                                             <TableCell align="center">R${sale.totalPrice.toFixed(2)}</TableCell>
@@ -259,15 +217,14 @@ const AdminReports = () => {
                                                 </TableBody>
                                             </Table>
 
-                                            {/* Componente de paginação para cada tabela */}
                                             <TablePagination
                                                 rowsPerPageOptions={[5, 10, 25]}
                                                 component="div"
-                                                count={report.salesDetails.length} // total de itens (sem slice)
+                                                count={report.salesDetails.length}
                                                 rowsPerPage={rowsPerPage}
                                                 page={page}
-                                                onPageChange={(event, newPage) => handleChangePage(resellerId, newPage)}
-                                                onRowsPerPageChange={(event) => handleChangeRowsPerPage(resellerId, event.target.value)}
+                                                onPageChange={(e, newPage) => handleChangePage(resellerId, newPage)}
+                                                onRowsPerPageChange={(e) => handleChangeRowsPerPage(resellerId, e.target.value)}
                                                 labelRowsPerPage="Linhas por página"
                                             />
                                         </TableContainer>
