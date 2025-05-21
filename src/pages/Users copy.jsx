@@ -23,6 +23,7 @@ import {
     IconButton
 } from '@mui/material';
 import { Delete, Edit, Inventory, LocalShipping, SortByAlpha, TrendingUp } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 
 import Header from '../components/Header';
 import api from '../services/api';
@@ -60,8 +61,10 @@ const Users = () => {
 
         try {
             setLoading(true);
-            const response = await api.post(
-                '/functions/list-sellers-with-sales',
+
+            // Chamar a função get-resellers-summary para obter os revendedores
+            const resellersResponse = await api.post(
+                '/functions/get-resellers-summary',
                 {},
                 {
                     headers: {
@@ -70,36 +73,104 @@ const Users = () => {
                 }
             );
 
-            const activeSellers = response.data.result.filter(
-                (seller) => !seller.isDeleted
+            const resellers = resellersResponse.data.result;
+
+            // Chamar a função get-admin-reports para obter as vendas
+            const reportsResponse = await api.post(
+                '/functions/get-admin-reports',
+                {},
+                {
+                    headers: {
+                        'X-Parse-Session-Token': sessionToken,
+                    },
+                }
             );
 
-            setSellers(activeSellers);       // Apenas define a lista original
+            const reports = reportsResponse.data.result;
+
+            // Combinar os dados de revendedores com os dados de vendas
+            const activeSellers = resellers.map((reseller) => {
+                const report = reports[reseller.fullname];
+                return {
+                    sellerName: reseller.fullname,
+                    sellerId: reseller.resellerId,
+                    salesCount: report ? report.totalSales : 0,
+                    email: reseller.email,
+                };
+            });
+
+            setSellers(activeSellers);
             setFilteredSellers(activeSellers);
             setLoading(false);
         } catch (err) {
-            console.error('Erro ao carregar revendedores:', err.response ? err.response.data : err.message);
+            console.error(
+                'Erro ao carregar revendedores:',
+                err.response ? err.response.data : err.message
+            );
             setLoading(false);
         }
     };
-
-
 
 
     useEffect(() => {
         fetchSellers();
     }, []);
 
-    const handleViewStock = (seller) => {
-        setSelectedStockSeller({
-            ...seller,
-            stockInput: Object.keys(seller.stock).reduce((acc, productId) => {
-                acc[productId] = 0;
-                return acc;
-            }, {}),
-        });
-        setOpenStockModal(true);
+
+    const navigate = useNavigate();
+    const fetchResellerStock = async (resellerId) => {
+        const sessionToken = localStorage.getItem("sessionToken");
+
+        try {
+            const response = await api.post(
+                "/functions/get-reseller-stock", // 🔹 Nova função para admins
+                { resellerId },
+                {
+                    headers: {
+                        "X-Parse-Session-Token": sessionToken,
+                    },
+                }
+            );
+
+            console.log("Estoque recebido:", response.data.result); // Depuração
+
+            return response.data.result; // Retorna o estoque
+        } catch (error) {
+            console.error("Erro ao buscar estoque do revendedor:", error);
+            return [];
+        }
     };
+
+
+
+    const handleViewStock = async (seller) => {
+        try {
+            const stock = await fetchResellerStock(seller.sellerId);
+
+            if (!stock || stock.length === 0) {
+                alert("Este revendedor não possui estoque disponível.");
+                return;
+            }
+
+            setSelectedStockSeller({
+                ...seller,
+                stock,
+                stockInput: stock.reduce((acc, product) => {
+                    acc[product.productId] = 0;
+                    return acc;
+                }, {}),
+            });
+
+            setOpenStockModal(true);
+        } catch (error) {
+            console.error("Erro ao buscar estoque:", error);
+            alert("Erro ao buscar estoque.");
+        }
+    };
+
+
+
+
 
     const handleViewDeliveries = (seller) => {
         setSelectedDeliverySeller(seller);
@@ -139,11 +210,6 @@ const Users = () => {
     };
 
 
-    const closeEditUserModal = () => {
-        setSelectedEditSeller(null);
-        setOpenEditUserModal(false);
-    };
-
     const handleUpdateUser = async () => {
         if (!selectedUser.fullname || !selectedUser.email) {
             setEditUserError('Todos os campos são obrigatórios!');
@@ -176,33 +242,45 @@ const Users = () => {
     };
 
     const handleDeleteUser = async (userId) => {
+        console.log("Tentando deletar usuário:", userId); // Depuração
+
         if (!window.confirm("Tem certeza que deseja deletar este revendedor?")) {
             return;
         }
 
+        const sessionToken = localStorage.getItem("sessionToken");
+
+        if (!sessionToken) {
+            alert("Token de sessão não encontrado!");
+            return;
+        }
+
         try {
-            await api.post(
-                '/functions/soft-delete-user',
+            const response = await api.post(
+                "/functions/soft-delete-user",
                 { userId },
                 {
                     headers: {
-                        'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
+                        "X-Parse-Session-Token": sessionToken,
                     },
                 }
             );
-            alert('Revendedor deletado com sucesso!');
-            fetchSellers(); // Atualiza a lista de revendedores
+
+            console.log("Resposta da API:", response.data); // Depuração
+
+            if (response.data.success) {
+                alert("Revendedor marcado como deletado!");
+                fetchSellers(); // Atualiza a lista de revendedores
+            } else {
+                alert("Erro ao deletar revendedor.");
+            }
         } catch (err) {
-            console.error('Erro ao deletar revendedor:', err);
-            alert('Erro ao deletar revendedor. Tente novamente.');
+            console.error("Erro ao deletar revendedor:", err);
+            alert("Erro ao deletar revendedor. Tente novamente.");
         }
     };
 
 
-
-    const toggleSortOrder = () => {
-        setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-    };
 
     const sortSellers = (sellersList) => {
         return [...sellersList].sort((a, b) => {
@@ -223,6 +301,7 @@ const Users = () => {
 
 
     const handleReturnStock = async (productId, quantity) => {
+        console.log("Chamando handleReturnStock:", productId, quantity);
         if (!selectedStockSeller) return;
 
         const sessionToken = localStorage.getItem('sessionToken');
@@ -349,39 +428,9 @@ const Users = () => {
                         sx={{ flex: 1 }}
                     />
 
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button
-                            onClick={toggleSortName}
-                            sx={{
-                                minWidth: 'auto',
-                                padding: '6px',
-                                borderRadius: '50%',
-                                backgroundColor: 'transparent',
-                                boxShadow: 'none',
-                                '&:hover': {
-                                    backgroundColor: '#f0f0f0',
-                                },
-                            }}
-                        >
-                            {sortOrderName === 'asc' ? 'A-Z' : 'Z-A'}
-                        </Button>
 
-                        <Button
-                            onClick={toggleSortSales}
-                            sx={{
-                                minWidth: 'auto',
-                                padding: '6px',
-                                borderRadius: '50%',
-                                backgroundColor: 'transparent',
-                                boxShadow: 'none',
-                                '&:hover': {
-                                    backgroundColor: '#f0f0f0',
-                                },
-                            }}
-                        >
-                            {sortOrderSales === 'asc' ? 'Menor->Maior' : 'Maior->Menor'}
-                        </Button>
-                    </Box>
+
+
                 </Box>
 
 
@@ -392,21 +441,34 @@ const Users = () => {
                         <Table>
                             <TableHead>
                                 <TableRow>
-                                    <TableCell sx={{ fontWeight: 'bold' }}>Revendedor</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Número de Vendas</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Ações</TableCell>
+                                    <TableCell
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={toggleSortName}
+                                    >
+                                        Revendedor {currentSort === 'name' && (sortOrderName === 'asc' ? '🔼' : '🔽')}
+                                    </TableCell>
+                                    <TableCell
+                                        align="center"
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={toggleSortSales}
+                                    >
+                                        Número de Vendas {currentSort === 'sales' && (sortOrderSales === 'asc' ? '🔼' : '🔽')}
+                                    </TableCell>
+                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>
+                                        Ações
+                                    </TableCell>
                                 </TableRow>
                             </TableHead>
+
+
                             <TableBody>
                                 {[...filteredSellers]
                                     .sort((a, b) => {
                                         if (currentSort === 'name') {
-                                            // Ordenar pelo nome
                                             return sortOrderName === 'asc'
                                                 ? a.sellerName.localeCompare(b.sellerName)
                                                 : b.sellerName.localeCompare(a.sellerName);
                                         } else {
-                                            // Ordenar pelas vendas
                                             return sortOrderSales === 'asc'
                                                 ? a.salesCount - b.salesCount
                                                 : b.salesCount - a.salesCount;
@@ -414,7 +476,12 @@ const Users = () => {
                                     })
                                     .map((seller) => (
                                         <TableRow key={seller.sellerId}>
-                                            <TableCell>{seller.sellerName || 'Sem nome'}</TableCell>
+                                            <TableCell
+                                                sx={{ fontWeight: 'bold', cursor: 'pointer', color: 'blue' }}
+                                                onClick={() => navigate(`/users/${seller.sellerId}`)}
+                                            >
+                                                {seller.sellerName || 'Sem nome'}
+                                            </TableCell>
                                             <TableCell align="center">{seller.salesCount}</TableCell>
                                             <TableCell align="center">
                                                 <Box
@@ -466,6 +533,8 @@ const Users = () => {
                                     ))}
 
 
+
+
                             </TableBody>
 
 
@@ -481,9 +550,9 @@ const Users = () => {
                 <DialogContent dividers>
                     {selectedStockSeller?.stock ? (
                         <List sx={{ padding: 0 }}>
-                            {Object.entries(selectedStockSeller.stock).map(([productId, productData]) => (
+                            {selectedStockSeller.stock.map((product) => (
                                 <Paper
-                                    key={productId}
+                                    key={product.productId}
                                     elevation={3}
                                     sx={{
                                         padding: '16px',
@@ -498,27 +567,27 @@ const Users = () => {
                                 >
                                     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
                                         <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
-                                            {productData.productName}
+                                            {product.productName}
                                         </Typography>
                                         <Typography variant="body2" sx={{ mb: 1 }}>
-                                            Quantidade: {productData.quantity}
+                                            Quantidade: {product.quantity}
                                         </Typography>
                                         <TextField
                                             type="number"
                                             label="Quantidade a devolver"
                                             size="small"
                                             sx={{ maxWidth: '150px' }}
-                                            value={selectedStockSeller.stockInput[productId] || ''}
+                                            value={selectedStockSeller.stockInput[product.productId] || ''}
                                             onChange={(e) => {
                                                 const inputQuantity = Math.min(
                                                     parseInt(e.target.value, 10) || 0,
-                                                    productData.quantity
+                                                    product.quantity
                                                 );
                                                 setSelectedStockSeller((prev) => ({
                                                     ...prev,
                                                     stockInput: {
                                                         ...prev.stockInput,
-                                                        [productId]: inputQuantity,
+                                                        [product.productId]: inputQuantity,
                                                     },
                                                 }));
                                             }}
@@ -528,8 +597,16 @@ const Users = () => {
                                         variant="contained"
                                         color="secondary"
                                         sx={{ mt: { xs: 2, sm: 0 }, width: { xs: '100%', sm: 'auto' } }}
-                                        onClick={() => handleReturnStock(productId, selectedStockSeller.stockInput[productId] || 0)}
-                                        disabled={!selectedStockSeller.stockInput[productId] || selectedStockSeller.stockInput[productId] <= 0}
+                                        onClick={() =>
+                                            handleReturnStock(
+                                                product.productId,
+                                                selectedStockSeller.stockInput[product.productId] || 0
+                                            )
+                                        }
+                                        disabled={
+                                            !selectedStockSeller.stockInput[product.productId] ||
+                                            selectedStockSeller.stockInput[product.productId] <= 0
+                                        }
                                     >
                                         Devolver
                                     </Button>
@@ -541,6 +618,7 @@ const Users = () => {
                     )}
                 </DialogContent>
             </Dialog>
+
 
             <Dialog open={openAddUserModal} onClose={() => setOpenAddUserModal(false)} fullWidth maxWidth="sm">
                 <DialogTitle>Adicionar Revendedor</DialogTitle>
@@ -622,7 +700,17 @@ const Users = () => {
                 onClose={closeDeliveriesModal}
                 selectedSeller={selectedDeliverySeller}
             />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
+            <br />
         </Box>
+
     );
 };
 

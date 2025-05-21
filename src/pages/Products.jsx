@@ -1,294 +1,222 @@
+// src/pages/Products.jsx
 import React, { useEffect, useState } from 'react';
 import {
-    Box,
-    Typography,
-    Table,
-    TableBody,
-    TableCell,
-    TableContainer,
-    TableHead,
-    TableRow,
-    Paper,
-    Button,
-    TextField,
-    IconButton,
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    CircularProgress,
-    MenuItem,
-    Select,
-    FormControl,
-    InputLabel,
+    Box, Typography, Table, TableBody, TableCell, TableContainer,
+    TableHead, TableRow, Paper, Button, TextField, IconButton, Dialog,
+    DialogTitle, DialogContent, DialogActions, CircularProgress, MenuItem
 } from '@mui/material';
-import { Edit, Delete, Assignment } from '@mui/icons-material';
+import Autocomplete from '@mui/material/Autocomplete';
+import {
+    Edit, Delete, Assignment, ArrowUpward, ArrowDownward
+} from '@mui/icons-material';
 import api from '../services/api';
 import Header from '../components/Header';
 
 const Products = () => {
+    /* ───────── estados ───────── */
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
+
+    /* busca e ordenação */
+    const [searchTerm, setSearchTerm] = useState('');
+    const [currentSort, setCurrentSort] = useState('name'); // name | stock | price
+    const [sortOrder, setSortOrder] = useState('asc');      // asc | desc
+
     const [newProduct, setNewProduct] = useState({ name: '', stock: '', price: '' });
+
     const [editingProduct, setEditingProduct] = useState(null);
     const [openEditModal, setOpenEditModal] = useState(false);
+
     const [openAssignModal, setOpenAssignModal] = useState(false);
     const [assignProduct, setAssignProduct] = useState({ resellerId: '', quantity: '' });
     const [resellers, setResellers] = useState([]);
+
     const [openDeleteConfirm, setOpenDeleteConfirm] = useState(false);
     const [productToDelete, setProductToDelete] = useState(null);
 
-    const getSessionToken = () => localStorage.getItem('sessionToken');
+    const tokenHeaders = () => ({
+        headers: { 'X-Parse-Session-Token': localStorage.getItem('sessionToken') }
+    });
 
+    /* ───────── carga inicial ───────── */
     useEffect(() => {
         const fetchProducts = async () => {
             try {
-                const response = await api.post("/functions/list-active-products", {}, {
-                    headers: {
-                        "X-Parse-Session-Token": localStorage.getItem("sessionToken"),
-                    },
-                });
-
-                if (Array.isArray(response.data.result)) {
-                    setProducts(response.data.result);
-                } else {
-                    console.error('A resposta não contém um array dentro de "result".');
-                    setProducts([]);
-                }
-            } catch (err) {
-                console.error("Erro ao buscar produtos ativos:", err);
-            } finally {
-                setLoading(false);
-            }
+                const res = await api.post('/functions/list-active-products', {}, tokenHeaders());
+                setProducts(Array.isArray(res.data.result) ? res.data.result : []);
+            } catch (e) { console.error(e); }
+            finally { setLoading(false); }
         };
 
         const fetchResellers = async () => {
-            const sessionToken = localStorage.getItem("sessionToken");
-            if (!sessionToken) {
-                console.error('Usuário não autenticado.');
-                return;
-            }
-
             try {
-                const response = await api.post('/functions/list-resellers', {}, {
-                    headers: {
-                        'X-Parse-Session-Token': sessionToken,
-                    },
-                });
-
-                if (Array.isArray(response.data.result)) {
-                    // Filtrar apenas revendedores que não estão deletados
-                    const activeResellers = response.data.result.filter(reseller => !reseller.isDeleted);
-                    setResellers(activeResellers);
-                }
-            } catch (error) {
-                console.error('Erro ao carregar revendedores:', error);
-            }
+                const res = await api.post('/functions/list-resellers', {}, tokenHeaders());
+                const actives = Array.isArray(res.data.result)
+                    ? res.data.result.filter(r => !r.isDeleted)
+                    : [];
+                setResellers(actives);
+            } catch (e) { console.error(e); }
         };
-
 
         fetchProducts();
         fetchResellers();
     }, []);
 
-
-    const handleAddProduct = async () => {
-        const sessionToken = getSessionToken();
-        if (!sessionToken) {
-            alert('Você precisa estar logado para adicionar um produto!');
-            return;
-        }
-
-        try {
-            if (!newProduct.name || !newProduct.stock || !newProduct.price) {
-                alert('Preencha todos os campos!');
-                return;
-            }
-
-            const response = await api.post('/functions/add-product', {
-                productName: newProduct.name,
-                stock: parseInt(newProduct.stock, 10),
-                price: parseFloat(newProduct.price),
-            }, {
-                headers: {
-                    'X-Parse-Session-Token': sessionToken,
-                },
+    /* ───────── utils de busca / ordenação ───────── */
+    const filteredAndSorted = () => {
+        const term = searchTerm.toLowerCase();
+        return [...products]
+            .filter(p => p.productName.toLowerCase().includes(term))
+            .sort((a, b) => {
+                const dir = sortOrder === 'asc' ? 1 : -1;
+                if (currentSort === 'name')
+                    return dir * a.productName.localeCompare(b.productName);
+                if (currentSort === 'stock')
+                    return dir * (a.stock - b.stock);
+                return dir * (a.price - b.price); // price
             });
+    };
 
-            setProducts((prev) => [...prev, response.data.result]);
-            setNewProduct({ name: '', stock: '', price: '' });
-            alert('Produto adicionado com sucesso!');
-        } catch (error) {
-            console.error('Erro ao adicionar produto:', error);
-            alert('Erro ao adicionar produto!');
+    const toggleSort = field => {
+        if (currentSort === field) {
+            setSortOrder(p => (p === 'asc' ? 'desc' : 'asc'));
+        } else {
+            setCurrentSort(field);
+            setSortOrder('asc');
         }
+    };
+
+    /* ───────── CRUD ───────── */
+    const handleAddProduct = async () => {
+        const { name, stock, price } = newProduct;
+        if (!name || !stock || !price) { alert('Preencha todos os campos!'); return; }
+        try {
+            const res = await api.post('/functions/add-product',
+                { productName: name, stock: +stock, price: +price }, tokenHeaders());
+            setProducts(p => [...p, res.data.result]);
+            setNewProduct({ name: '', stock: '', price: '' });
+            alert('Produto adicionado!');
+        } catch { alert('Erro ao adicionar produto'); }
     };
 
     const handleUpdateProduct = async () => {
-        const sessionToken = getSessionToken();
-        if (!sessionToken) {
-            alert('Você precisa estar logado para editar um produto!');
-            return;
-        }
-
         try {
-            const response = await api.post('/functions/update-product', {
-                productId: editingProduct.objectId,
-                productName: editingProduct.productName,
-                stock: parseInt(editingProduct.stock, 10),
-                price: parseFloat(editingProduct.price),
-            }, {
-                headers: {
-                    'X-Parse-Session-Token': sessionToken,
-                },
-            });
-
-            setProducts((prev) =>
-                prev.map((product) =>
-                    product.objectId === response.data.result.objectId
-                        ? response.data.result
-                        : product
-                )
-            );
+            const res = await api.post('/functions/update-product',
+                {
+                    productId: editingProduct.objectId,
+                    productName: editingProduct.productName,
+                    stock: +editingProduct.stock,
+                    price: +editingProduct.price
+                }, tokenHeaders());
+            setProducts(p =>
+                p.map(prod => prod.objectId === res.data.result.objectId ? res.data.result : prod));
             setOpenEditModal(false);
-            alert('Produto atualizado com sucesso!');
-        } catch (error) {
-            console.error('Erro ao editar produto:', error);
-            alert('Erro ao editar produto!');
-        }
+        } catch { alert('Erro ao editar'); }
     };
 
     const handleDeleteProduct = async () => {
-        const sessionToken = getSessionToken();
-        if (!sessionToken) {
-            alert('Você precisa estar logado para excluir um produto!');
-            return;
-        }
-
         try {
-            await api.post('/functions/soft-delete-product', { productId: productToDelete.objectId }, {
-                headers: {
-                    'X-Parse-Session-Token': sessionToken,
-                },
-            });
-
-            setProducts((prev) => prev.filter((product) => product.objectId !== productToDelete.objectId));
+            await api.post('/functions/soft-delete-product',
+                { productId: productToDelete.objectId }, tokenHeaders());
+            setProducts(p => p.filter(prod => prod.objectId !== productToDelete.objectId));
             setOpenDeleteConfirm(false);
-            alert('Produto excluído com sucesso!');
-        } catch (error) {
-            console.error('Erro ao excluir produto:', error);
-            alert('Erro ao excluir produto!');
-        }
+        } catch { alert('Erro ao excluir'); }
     };
 
     const handleAssignProductToReseller = async () => {
-        const sessionToken = getSessionToken();
-        if (!sessionToken) {
-            alert('Você precisa estar logado para atribuir um produto!');
-            return;
-        }
-
+        const { resellerId, quantity } = assignProduct;
+        if (!resellerId || !quantity) { alert('Preencha todos os campos!'); return; }
         try {
-            const { resellerId, quantity } = assignProduct;
-            if (!resellerId || !quantity) {
-                alert('Preencha todos os campos!');
-                return;
-            }
-
-            await api.post('/functions/add-stock', {
-                userId: resellerId,
-                productId: editingProduct.objectId,
-                stock: parseInt(quantity, 10),
-            }, {
-                headers: {
-                    'X-Parse-Session-Token': sessionToken,
-                },
-            });
-
+            await api.post('/functions/add-stock',
+                { userId: resellerId, productId: editingProduct.objectId, stock: +quantity }, tokenHeaders());
             setOpenAssignModal(false);
-            alert('Produto atribuído ao revendedor com sucesso!');
-        } catch (error) {
-            console.error('Erro ao atribuir produto ao revendedor:', error);
-            alert('Erro ao atribuir produto!');
-        }
+            alert('Produto atribuído!');
+        } catch { alert('Erro ao atribuir'); }
     };
 
-    const handleOpenDeleteConfirm = (product) => {
-        setProductToDelete(product);
-        setOpenDeleteConfirm(true);
-    };
-
+    /* ───────── render ───────── */
     return (
         <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#f5f5f5' }}>
             <Header />
-            <Box sx={{ padding: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Typography variant="h4" sx={{ mb: 4 }}>
-                    Gerenciar Produtos
-                </Typography>
 
-                <Box component="form" noValidate autoComplete="off" sx={{ display: 'flex', flexDirection: 'row', gap: '8px', mb: 4, maxWidth: '800px', width: '100%' }}>
+            <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <Typography variant="h4" sx={{ mb: 4 }}>Gerenciar Produtos</Typography>
+
+                {/* linha de cadastro + busca */}
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', maxWidth: 900, mb: 4 }}>
+
+                    {/* formulário de adição */}
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                        <TextField label="Nome" fullWidth value={newProduct.name}
+                            onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} />
+                        <TextField label="Estoque" type="number" fullWidth value={newProduct.stock}
+                            onChange={e => setNewProduct({ ...newProduct, stock: e.target.value })} />
+                        <TextField label="Preço" type="number" fullWidth value={newProduct.price}
+                            onChange={e => setNewProduct({ ...newProduct, price: e.target.value })} />
+                        <Button variant="contained" onClick={handleAddProduct}>ADD</Button>
+                    </Box>
+
+                    {/* campo de busca */}
                     <TextField
-                        label="Nome do Produto"
+                        label="Pesquisar produto"
                         fullWidth
-                        value={newProduct.name}
-                        onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
                     />
-                    <TextField
-                        label="Estoque"
-                        type="number"
-                        fullWidth
-                        value={newProduct.stock}
-                        onChange={(e) => setNewProduct({ ...newProduct, stock: e.target.value })}
-                    />
-                    <TextField
-                        label="Preço"
-                        type="number"
-                        fullWidth
-                        value={newProduct.price}
-                        onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                    />
-                    <Button
-                        variant="contained"
-                        color="primary"
-                        onClick={handleAddProduct}
-                    >
-                        ADD
-                    </Button>
                 </Box>
 
-                {loading ? (
-                    <CircularProgress />
-                ) : (
-                    <TableContainer component={Paper} sx={{ maxWidth: '800px', width: '100%' }}>
+                {loading ? <CircularProgress /> : (
+                    <TableContainer component={Paper} sx={{ width: '100%', maxWidth: 900 }}>
                         <Table>
                             <TableHead>
                                 <TableRow>
-                                    <TableCell align="left" sx={{ fontWeight: 'bold' }}>Nome do Produto</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Estoque</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 'bold' }}>Preço</TableCell>
+                                    <TableCell
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={() => toggleSort('name')}
+                                    >
+                                        Nome&nbsp;
+                                        {currentSort === 'name' && (
+                                            sortOrder === 'asc' ? <ArrowUpward fontSize="inherit" /> : <ArrowDownward fontSize="inherit" />
+                                        )}
+                                    </TableCell>
+                                    <TableCell
+                                        align="center"
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={() => toggleSort('stock')}
+                                    >
+                                        Estoque&nbsp;
+                                        {currentSort === 'stock' && (
+                                            sortOrder === 'asc' ? <ArrowUpward fontSize="inherit" /> : <ArrowDownward fontSize="inherit" />
+                                        )}
+                                    </TableCell>
+                                    <TableCell
+                                        align="center"
+                                        sx={{ fontWeight: 'bold', cursor: 'pointer' }}
+                                        onClick={() => toggleSort('price')}
+                                    >
+                                        Preço&nbsp;
+                                        {currentSort === 'price' && (
+                                            sortOrder === 'asc' ? <ArrowUpward fontSize="inherit" /> : <ArrowDownward fontSize="inherit" />
+                                        )}
+                                    </TableCell>
                                     <TableCell align="center" sx={{ fontWeight: 'bold' }}>Ações</TableCell>
                                 </TableRow>
                             </TableHead>
+
                             <TableBody>
-                                {products.map((product) => (
-                                    <TableRow key={product.objectId}>
-                                        <TableCell align="left">{product.productName}</TableCell>
-                                        <TableCell align="center">{product.stock}</TableCell>
-                                        <TableCell align="center">R${product.price.toFixed(2)}</TableCell>
+                                {filteredAndSorted().map(prod => (
+                                    <TableRow key={prod.objectId}>
+                                        <TableCell>{prod.productName}</TableCell>
+                                        <TableCell align="center">{prod.stock}</TableCell>
+                                        <TableCell align="center">R${prod.price.toFixed(2)}</TableCell>
                                         <TableCell align="center">
-                                            <IconButton color="primary" onClick={() => {
-                                                setEditingProduct(product);
-                                                setOpenEditModal(true);
-                                            }}>
+                                            <IconButton color="primary" onClick={() => { setEditingProduct(prod); setOpenEditModal(true); }}>
                                                 <Edit />
                                             </IconButton>
-                                            <IconButton color="primary" onClick={() => {
-                                                setEditingProduct(product);
-                                                setOpenAssignModal(true);
-                                            }}>
+                                            <IconButton color="primary" onClick={() => { setEditingProduct(prod); setOpenAssignModal(true); }}>
                                                 <Assignment />
                                             </IconButton>
-                                            <IconButton color="error" onClick={() => handleOpenDeleteConfirm(product)}>
+                                            <IconButton color="error" onClick={() => { setProductToDelete(prod); setOpenDeleteConfirm(true); }}>
                                                 <Delete />
                                             </IconButton>
                                         </TableCell>
@@ -299,147 +227,87 @@ const Products = () => {
                     </TableContainer>
                 )}
 
+                {/* ───────── modal editar ───────── */}
                 <Dialog open={openEditModal} onClose={() => setOpenEditModal(false)}>
                     <DialogTitle>Editar Produto</DialogTitle>
                     <DialogContent>
-                        <TextField
-                            label="Nome do Produto"
-                            fullWidth
-                            margin="normal"
+                        <TextField label="Nome" fullWidth margin="normal"
                             value={editingProduct?.productName || ''}
-                            onChange={(e) =>
-                                setEditingProduct({ ...editingProduct, productName: e.target.value })
-                            }
-                        />
-                        <TextField
-                            label="Estoque"
-                            type="number"
-                            fullWidth
-                            margin="normal"
+                            onChange={e => setEditingProduct({ ...editingProduct, productName: e.target.value })} />
+                        <TextField label="Estoque" type="number" fullWidth margin="normal"
                             value={editingProduct?.stock || ''}
-                            onChange={(e) =>
-                                setEditingProduct({ ...editingProduct, stock: e.target.value })
-                            }
-                        />
-                        <TextField
-                            label="Preço"
-                            type="number"
-                            fullWidth
-                            margin="normal"
+                            onChange={e => setEditingProduct({ ...editingProduct, stock: e.target.value })} />
+                        <TextField label="Preço" type="number" fullWidth margin="normal"
                             value={editingProduct?.price || ''}
-                            onChange={(e) =>
-                                setEditingProduct({ ...editingProduct, price: e.target.value })
-                            }
-                        />
+                            onChange={e => setEditingProduct({ ...editingProduct, price: e.target.value })} />
                     </DialogContent>
                     <DialogActions>
-                        <Button onClick={() => setOpenEditModal(false)} color="secondary">
-                            Cancelar
-                        </Button>
-                        <Button onClick={handleUpdateProduct} color="primary">
-                            Salvar
-                        </Button>
+                        <Button onClick={() => setOpenEditModal(false)} color="secondary">Cancelar</Button>
+                        <Button onClick={handleUpdateProduct} color="primary">Salvar</Button>
                     </DialogActions>
                 </Dialog>
 
+                {/* ───────── modal atribuir ───────── */}
                 <Dialog open={openAssignModal} onClose={() => setOpenAssignModal(false)}>
                     <DialogTitle>Atribuir Produto ao Revendedor</DialogTitle>
-                    <DialogContent>
-                        {/* Informações do produto selecionado */}
-                        <Typography variant="subtitle1" gutterBottom>
-                            Produto: <strong>{editingProduct?.productName}</strong>
-                            <br />
+                    <DialogContent sx={{ minWidth: 320 }}>
+                        <Typography variant="subtitle1" sx={{ mb: 2 }}>
+                            Produto: <strong>{editingProduct?.productName}</strong><br />
                             Em estoque: <strong>{editingProduct?.stock}</strong>
                         </Typography>
 
-                        {/* Campo de seleção de revendedor */}
-                        <TextField
-                            label="Revendedor"
-                            select
-                            fullWidth
-                            margin="normal"
-                            value={assignProduct.resellerId}
-                            onChange={(e) => setAssignProduct({ ...assignProduct, resellerId: e.target.value })}
-                            error={!assignProduct.resellerId}
-                            helperText={!assignProduct.resellerId ? 'Por favor, selecione um revendedor.' : ''}
-                        >
-                            {resellers.map((reseller) => (
-                                <MenuItem key={reseller.objectId} value={reseller.objectId}>
-                                    {reseller.fullname}
-                                </MenuItem>
-                            ))}
-                        </TextField>
+                        {/* Autocomplete para revendedores */}
+                        <Autocomplete
+                            options={resellers.sort((a, b) => a.fullname.localeCompare(b.fullname))}
+                            getOptionLabel={(opt) => opt.fullname}
+                            isOptionEqualToValue={(opt, val) => opt.objectId === val.objectId}
+                            value={resellers.find(r => r.objectId === assignProduct.resellerId) || null}
+                            onChange={(_, newVal) =>
+                                setAssignProduct({ ...assignProduct, resellerId: newVal ? newVal.objectId : '' })
+                            }
+                            renderInput={(params) => (
+                                <TextField {...params} label="Revendedor" margin="normal" fullWidth />
+                            )}
+                        />
 
-
-
-
-                        {/* Campo de quantidade */}
                         <TextField
                             label="Quantidade"
                             type="number"
                             fullWidth
                             margin="normal"
                             value={assignProduct.quantity}
-                            onChange={(e) => {
-                                const value = parseInt(e.target.value, 10);
-
-                                // Validação para impedir negativos e limitar ao estoque disponível
-                                if (!isNaN(value)) {
-                                    if (value >= 0 && value <= editingProduct?.stock) {
-                                        setAssignProduct({ ...assignProduct, quantity: value });
-                                    } else if (value > editingProduct?.stock) {
-                                        setAssignProduct({ ...assignProduct, quantity: editingProduct?.stock });
-                                    }
-                                } else {
-                                    setAssignProduct({ ...assignProduct, quantity: '' });
-                                }
+                            onChange={e => {
+                                const v = parseInt(e.target.value, 10);
+                                setAssignProduct({ ...assignProduct, quantity: isNaN(v) ? '' : v });
                             }}
-                            error={
-                                assignProduct.quantity !== '' &&
-                                (assignProduct.quantity < 0 || assignProduct.quantity > editingProduct?.stock)
-                            }
-                            helperText={
-                                assignProduct.quantity !== '' && assignProduct.quantity > editingProduct?.stock
-                                    ? `A quantidade não pode exceder o estoque disponível (${editingProduct?.stock}).`
-                                    : assignProduct.quantity !== '' && assignProduct.quantity < 0
-                                        ? 'A quantidade não pode ser negativa.'
-                                        : ''
-                            }
+                            helperText={`Máx: ${editingProduct?.stock}`}
                         />
                     </DialogContent>
                     <DialogActions>
-                        <Button onClick={() => setOpenAssignModal(false)} color="secondary">
-                            Cancelar
-                        </Button>
+                        <Button onClick={() => setOpenAssignModal(false)} color="secondary">Cancelar</Button>
                         <Button
                             onClick={handleAssignProductToReseller}
-                            color="primary"
                             disabled={
                                 !assignProduct.resellerId ||
                                 !assignProduct.quantity ||
                                 assignProduct.quantity <= 0 ||
                                 assignProduct.quantity > editingProduct?.stock
                             }
-                        >
+                            color="primary">
                             Atribuir
                         </Button>
                     </DialogActions>
                 </Dialog>
 
-
-
+                {/* ───────── modal excluir ───────── */}
                 <Dialog open={openDeleteConfirm} onClose={() => setOpenDeleteConfirm(false)}>
                     <DialogTitle>Confirmar Exclusão</DialogTitle>
                     <DialogContent>
-                        Tem certeza que deseja excluir o produto <strong>{productToDelete?.productName}</strong>?
+                        Tem certeza que deseja excluir <strong>{productToDelete?.productName}</strong>?
                     </DialogContent>
                     <DialogActions>
-                        <Button onClick={() => setOpenDeleteConfirm(false)} color="secondary">
-                            Cancelar
-                        </Button>
-                        <Button onClick={handleDeleteProduct} color="error">
-                            Excluir
-                        </Button>
+                        <Button onClick={() => setOpenDeleteConfirm(false)} color="secondary">Cancelar</Button>
+                        <Button onClick={handleDeleteProduct} color="error">Excluir</Button>
                     </DialogActions>
                 </Dialog>
             </Box>
