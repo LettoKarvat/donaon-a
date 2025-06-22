@@ -1,12 +1,14 @@
 // src/pages/Users.jsx
 import React, { useEffect, useState } from 'react';
 import {
-    Box, Typography, Paper, Table, TableBody, TableCell, TableContainer,
-    TableHead, TableRow, CircularProgress, Button, TextField, Dialog,
-    DialogTitle, DialogContent, List, Paper as ListPaper, DialogActions
+    Box, Typography, Paper, Table, TableBody, TableCell,
+    TableContainer, TableHead, TableRow, CircularProgress, Button,
+    TextField, Dialog, DialogTitle, DialogContent, DialogActions,
+    List, Paper as ListPaper
 } from '@mui/material';
 import {
-    Delete, Edit, Inventory, LocalShipping, Restore
+    Delete, Edit, Inventory, LocalShipping, Restore,
+    CleaningServices, KeyboardReturn
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 
@@ -22,10 +24,10 @@ const tokenHeaders = () => ({
 const Users = () => {
     /* ───────── estados principais ───────── */
     const [loading, setLoading] = useState(true);
-    const [sellers, setSellers] = useState([]);          // lista completa
-    const [filteredSellers, setFilteredSellers] = useState([]); // exibidos
+    const [sellers, setSellers] = useState([]);
+    const [filteredSellers, setFilteredSellers] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [showOnlyDeleted, setShowOnlyDeleted] = useState(false); // false = mostrar ativos
+    const [showOnlyDeleted, setShowOnlyDeleted] = useState(false);
 
     const [currentSort, setCurrentSort] = useState('name');
     const [sortOrderName, setSortOrderName] = useState('asc');
@@ -55,11 +57,8 @@ const Users = () => {
 
         setLoading(true);
         try {
-            // precisa conter isDeleted
-            const resellers =
-                (await api.post('/functions/get-resellers-summarys', {}, tokenHeaders())).data.result;
-            const reports =
-                (await api.post('/functions/get-admin-reports', {}, tokenHeaders())).data.result;
+            const resellers = (await api.post('/functions/get-resellers-summarys', {}, tokenHeaders())).data.result;
+            const reports = (await api.post('/functions/get-admin-reports', {}, tokenHeaders())).data.result;
 
             const list = resellers.map(r => ({
                 sellerId: r.resellerId,
@@ -77,15 +76,12 @@ const Users = () => {
             setLoading(false);
         }
     };
-
     useEffect(() => { fetchSellers(); }, []);
 
     /* ───────── filtro & busca ───────── */
     const applyFilters = (base, term, onlyDeleted) =>
         base
             .filter(s => s.sellerName.toLowerCase().includes(term.toLowerCase()))
-            // se onlyDeleted=true → retorna apenas inativos;
-            // se false → retorna apenas ativos
             .filter(s => (onlyDeleted ? s.isDeleted : !s.isDeleted));
 
     const handleSearch = e => {
@@ -108,7 +104,7 @@ const Users = () => {
     const fetchResellerStock = async resellerId => {
         try {
             const res = await api.post('/functions/get-reseller-stock', { resellerId }, tokenHeaders());
-            return res.data.result;
+            return res.data.result;                                   // [{productId, productName, quantity}]
         } catch (e) { console.error('Erro estoque:', e); return []; }
     };
 
@@ -125,17 +121,76 @@ const Users = () => {
     };
     const closeStockModal = () => { setSelectedStockSeller(null); setOpenStockModal(false); };
 
+    /* devolução unitária */
     const handleReturnStock = async (productId, quantity) => {
         if (!quantity) return;
         try {
-            await api.post('/functions/return-stock',
-                { resellerId: selectedStockSeller.sellerId, productId, quantity }, tokenHeaders());
-            alert('Produto devolvido!');
+            await api.post(
+                '/functions/return-stock',
+                { resellerId: selectedStockSeller.sellerId, productId, quantity: parseInt(quantity, 10) },
+                tokenHeaders()
+            );
+            const updated = await fetchResellerStock(selectedStockSeller.sellerId);
+            setSelectedStockSeller(prev => ({
+                ...prev,
+                stock: updated,
+                stockInput: updated.reduce((acc, p) => ({ ...acc, [p.productId]: 0 }), {})
+            }));
             fetchSellers();
-            closeStockModal();
         } catch { alert('Erro ao devolver estoque'); }
     };
 
+    /* devolução em lote */
+    const handleBatchReturn = async () => {
+        if (!selectedStockSeller) return;
+        const items = Object.entries(selectedStockSeller.stockInput)
+            .filter(([, qty]) => qty > 0);
+        if (!items.length) { alert('Defina ao menos uma quantidade.'); return; }
+
+        try {
+            await Promise.all(
+                items.map(([productId, quantity]) =>
+                    api.post('/functions/return-stock',
+                        {
+                            resellerId: selectedStockSeller.sellerId,
+                            productId,
+                            quantity: parseInt(quantity, 10)
+                        },
+                        tokenHeaders())
+                )
+            );
+            alert('Itens devolvidos!');
+            fetchSellers();
+            closeStockModal();
+        } catch { alert('Erro ao devolver em lote.'); }
+    };
+
+    /* devolução total */
+    const handleReturnAll = async () => {
+        if (!selectedStockSeller) return;
+        if (!window.confirm('Deseja devolver TODO o estoque deste revendedor?')) return;
+        try {
+            const toReturn = selectedStockSeller.stock.filter(p => p.quantity > 0);
+            if (!toReturn.length) { alert('Nenhum item com quantidade > 0.'); return; }
+
+            await Promise.all(
+                toReturn.map(({ productId, quantity }) =>
+                    api.post('/functions/return-stock',
+                        {
+                            resellerId: selectedStockSeller.sellerId,
+                            productId,
+                            quantity: parseInt(quantity, 10)
+                        },
+                        tokenHeaders())
+                )
+            );
+            alert('Estoque completo devolvido!');
+            fetchSellers();
+            closeStockModal();
+        } catch { alert('Erro ao devolver tudo.'); }
+    };
+
+    /* ───────── entregas ───────── */
     const handleViewDeliveries = seller => {
         setSelectedDeliverySeller(seller);
         setOpenDeliveriesModal(true);
@@ -188,6 +243,7 @@ const Users = () => {
         <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: '#f5f5f5' }}>
             <Header />
 
+            {/* ======== CONTEÚDO PRINCIPAL ======== */}
             <Box sx={{ p: 2, flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 {/* título + adicionar */}
                 <Box sx={{
@@ -270,11 +326,12 @@ const Users = () => {
                 )}
             </Box>
 
-            {/* ────────── MODAL ESTOQUE ────────── */}
+            {/* ================ MODAL ESTOQUE ================ */}
             <Dialog open={openStockModal} onClose={closeStockModal} fullWidth maxWidth="sm">
                 <DialogTitle sx={{ textAlign: 'center', fontWeight: 'bold' }}>
                     Estoque de {selectedStockSeller?.sellerName}
                 </DialogTitle>
+
                 <DialogContent dividers>
                     {selectedStockSeller?.stock?.length ? (
                         <List sx={{ p: 0 }}>
@@ -287,8 +344,8 @@ const Users = () => {
                                         <Typography fontWeight="bold">{prod.productName}</Typography>
                                         <Typography variant="body2" sx={{ mb: 1 }}>Quantidade: {prod.quantity}</Typography>
                                         <TextField
-                                            type="number" size="small" label="Quantidade a devolver" sx={{ maxWidth: 140 }}
-                                            value={selectedStockSeller.stockInput[prod.productId] || ''}
+                                            type="number" size="small" label="Quantidade a devolver" sx={{ maxWidth: 160 }}
+                                            value={selectedStockSeller.stockInput[prod.productId] ?? ''}
                                             onChange={e => {
                                                 const val = Math.min(parseInt(e.target.value || 0, 10), prod.quantity);
                                                 setSelectedStockSeller(prev => ({
@@ -298,10 +355,13 @@ const Users = () => {
                                             }}
                                         />
                                     </Box>
+
                                     <Button variant="contained" color="secondary"
                                         disabled={!selectedStockSeller.stockInput[prod.productId]}
-                                        onClick={() => handleReturnStock(prod.productId,
-                                            selectedStockSeller.stockInput[prod.productId] || 0)}>
+                                        onClick={() =>
+                                            handleReturnStock(prod.productId,
+                                                selectedStockSeller.stockInput[prod.productId] || 0)}
+                                    >
                                         Devolver
                                     </Button>
                                 </ListPaper>
@@ -309,16 +369,53 @@ const Users = () => {
                         </List>
                     ) : <Typography>Sem estoque registrado.</Typography>}
                 </DialogContent>
+
+                {/* ações de lote */}
+                {selectedStockSeller?.stock?.length ? (
+                    <DialogActions sx={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+                        <Button
+                            startIcon={<CleaningServices />}
+                            onClick={() =>
+                                setSelectedStockSeller(prev => ({
+                                    ...prev,
+                                    stockInput: Object.keys(prev.stockInput).reduce((acc, id) => ({ ...acc, [id]: 0 }), {})
+                                }))
+                            }
+                        >
+                            Limpar Quantidades
+                        </Button>
+
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            <Button
+                                variant="contained"
+                                color="error"
+                                startIcon={<KeyboardReturn />}
+                                onClick={handleReturnAll}
+                            >
+                                Devolver Tudo
+                            </Button>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                disabled={!Object.values(selectedStockSeller.stockInput).some(q => q > 0)}
+                                onClick={handleBatchReturn}
+                            >
+                                Devolver Selecionados
+                            </Button>
+                            <Button onClick={closeStockModal} color="secondary">Cancelar</Button>
+                        </Box>
+                    </DialogActions>
+                ) : null}
             </Dialog>
 
-            {/* ────────── MODAL ENTREGAS ────────── */}
+            {/* ================ MODAL ENTREGAS ================ */}
             <DeliveriesModal
                 open={openDeliveriesModal}
                 onClose={closeDeliveriesModal}
                 selectedSeller={selectedDeliverySeller}
             />
 
-            {/* ────────── MODAL ADICIONAR ────────── */}
+            {/* ================ MODAL ADICIONAR ================ */}
             <Dialog open={openAddUserModal} onClose={() => setOpenAddUserModal(false)} fullWidth maxWidth="sm">
                 <DialogTitle>Adicionar Revendedor</DialogTitle>
                 <DialogContent dividers>
@@ -339,7 +436,7 @@ const Users = () => {
                 </DialogActions>
             </Dialog>
 
-            {/* ────────── MODAL EDITAR ────────── */}
+            {/* ================ MODAL EDITAR ================ */}
             <Dialog open={openEditUserModal} onClose={() => setOpenEditUserModal(false)} fullWidth maxWidth="sm">
                 <DialogTitle>Editar Revendedor</DialogTitle>
                 <DialogContent dividers>
