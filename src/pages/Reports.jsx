@@ -80,7 +80,7 @@ const AdminReports = () => {
             const monthlyData = await Promise.all(
                 months.map(async (m) => {
                     const { data } = await api.post(
-                        '/functions/get-admin-reports',
+                        '/functions/gett-admin-reports',
                         { month: m, year },
                         { headers },
                     );
