@@ -7,8 +7,19 @@ dayjs.extend(isBetween);
 dayjs.extend(utc);
 
 import {
-    Box, Typography, Paper, TextField, Alert, Button, CircularProgress,
-    TableContainer, Table, TableHead, TableRow, TableCell, TableBody,
+    Box,
+    Typography,
+    Paper,
+    TextField,
+    Alert,
+    Button,
+    CircularProgress,
+    TableContainer,
+    Table,
+    TableHead,
+    TableRow,
+    TableCell,
+    TableBody,
     TablePagination,
 } from '@mui/material';
 
@@ -45,13 +56,14 @@ const AdminReports = () => {
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    const [startDate, setStartDate] = useState(dayjs().startOf('year'));
-    const [endDate, setEndDate] = useState(dayjs());
+    /* —— datas: primeiro dia do mês até hoje —— */
+    const [startDate, setStartDate] = useState(dayjs().startOf('month'));
+    const [endDate, setEndDate] = useState(dayjs().endOf('day'));
 
     const [pageState, setPageState] = useState({});
     const navigate = useNavigate();
 
-    /* -------- fetch de janeiro até o mês corrente -------- */
+    /* ---------------- fetch de janeiro até o mês corrente ---------------- */
     const fetchReports = async () => {
         const sessionToken = localStorage.getItem('sessionToken');
         if (!sessionToken) return setError('Sessão expirada. Faça login novamente.');
@@ -60,7 +72,7 @@ const AdminReports = () => {
             setLoading(true);
             const headers = { 'X-Parse-Session-Token': sessionToken };
             const year = dayjs().year();
-            const currentMonth = dayjs().month() + 1;                // 1-base
+            const currentMonth = dayjs().month() + 1; // 1-based
 
             const months = Array.from({ length: currentMonth }, (_, i) => i + 1);
 
@@ -88,14 +100,17 @@ const AdminReports = () => {
         }
     };
 
-    useEffect(() => { fetchReports(); }, []);
+    useEffect(() => {
+        fetchReports();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    /* -------- helpers -------- */
+    /* ---------------- helpers ---------------- */
     const calcTotals = (sales) =>
         sales.reduce(
             (tot, s) => {
                 const d = parseSaleDate(s.saleDate);
-                if (d.isBetween(startDate, endDate, 'day', '[]')) {
+                if (d.isBetween(startDate, endDate, null, '[]')) {
                     tot.totalSales += s.quantitySold;
                     tot.totalRevenue += s.totalPrice;
                 }
@@ -108,7 +123,7 @@ const AdminReports = () => {
         const filtered = Object.entries(base).reduce((acc, [name, rep]) => {
             if (name.toLowerCase().includes(term.toLowerCase())) {
                 const filteredSales = rep.salesDetails.filter((s) =>
-                    parseSaleDate(s.saleDate).isBetween(dIni, dFim, 'day', '[]'),
+                    parseSaleDate(s.saleDate).isBetween(dIni, dFim, null, '[]'),
                 );
                 acc[name] = { ...rep, salesDetails: filteredSales };
             }
@@ -117,24 +132,30 @@ const AdminReports = () => {
         setFilteredReports(filtered);
     };
 
-    /* -------- handlers -------- */
+    /* ---------------- handlers ---------------- */
     const handleSearch = (e) => {
         const term = e.target.value;
         setSearchTerm(term);
         applyFilters(term, startDate, endDate);
     };
+
     const handleStartDateChange = (d) => {
-        setStartDate(d);
-        applyFilters(searchTerm, d, endDate);
+        const newStart = d ? d.startOf('day') : null;
+        setStartDate(newStart);
+        applyFilters(searchTerm, newStart, endDate);
     };
+
     const handleEndDateChange = (d) => {
-        setEndDate(d);
-        applyFilters(searchTerm, startDate, d);
+        const newEnd = d ? d.endOf('day') : null;
+        setEndDate(newEnd);
+        applyFilters(searchTerm, startDate, newEnd);
     };
 
     const handleViewDetails = (id) => navigate(`/admin/reports/${id}`);
+
     const handleChangePage = (id, p) =>
         setPageState((st) => ({ ...st, [id]: { ...st[id], page: p } }));
+
     const handleChangeRowsPerPage = (id, n) =>
         setPageState((st) => ({ ...st, [id]: { page: 0, rowsPerPage: +n } }));
 
@@ -154,13 +175,22 @@ const AdminReports = () => {
         [filteredReports, startDate, endDate],
     );
 
-    /* -------- UI -------- */
+    /* ---------------- UI ---------------- */
     return (
         <LocalizationProvider dateAdapter={AdapterDayjs}>
-            <Box sx={{ minHeight: '100vh', background: '#f5f5f5', display: 'flex', flexDirection: 'column' }}>
+            <Box
+                sx={{
+                    minHeight: '100vh',
+                    background: '#f5f5f5',
+                    display: 'flex',
+                    flexDirection: 'column',
+                }}
+            >
                 <Header />
                 <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <Typography variant="h4" sx={{ mb: 4 }}>Relatório de Vendas (Administrador)</Typography>
+                    <Typography variant="h4" sx={{ mb: 4 }}>
+                        Relatório de Vendas (Administrador)
+                    </Typography>
 
                     {loading ? (
                         <CircularProgress />
@@ -169,9 +199,24 @@ const AdminReports = () => {
                     ) : (
                         <Paper sx={{ p: 2, width: '100%', maxWidth: 900 }}>
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
-                                <TextField fullWidth label="Buscar Revendedor" value={searchTerm} onChange={handleSearch} />
-                                <DatePicker label="Data Início" value={startDate} onChange={handleStartDateChange} format="DD/MM/YYYY" />
-                                <DatePicker label="Data Fim" value={endDate} onChange={handleEndDateChange} format="DD/MM/YYYY" />
+                                <TextField
+                                    fullWidth
+                                    label="Buscar Revendedor"
+                                    value={searchTerm}
+                                    onChange={handleSearch}
+                                />
+                                <DatePicker
+                                    label="Data Início"
+                                    value={startDate}
+                                    onChange={handleStartDateChange}
+                                    format="DD/MM/YYYY"
+                                />
+                                <DatePicker
+                                    label="Data Fim"
+                                    value={endDate}
+                                    onChange={handleEndDateChange}
+                                    format="DD/MM/YYYY"
+                                />
                             </Box>
 
                             {sortedResellers.map(({ name, rep, totalSales, totalRevenue }) => {
@@ -183,17 +228,30 @@ const AdminReports = () => {
                                 return (
                                     <Box key={name} sx={{ mb: 4 }}>
                                         <Typography variant="h6">{name}</Typography>
-                                        <Typography><strong>Total de Vendas:</strong> <Button onClick={() => handleViewDetails(id)}>{totalSales}</Button></Typography>
-                                        <Typography><strong>Receita Total:</strong> R${totalRevenue.toFixed(2)}</Typography>
+                                        <Typography>
+                                            <strong>Total de Vendas:</strong>{' '}
+                                            <Button onClick={() => handleViewDetails(id)}>{totalSales}</Button>
+                                        </Typography>
+                                        <Typography>
+                                            <strong>Receita Total:</strong> R${totalRevenue.toFixed(2)}
+                                        </Typography>
 
                                         <TableContainer component={Paper} sx={{ mt: 2 }}>
                                             <Table>
                                                 <TableHead>
                                                     <TableRow>
-                                                        <TableCell><strong>Produto</strong></TableCell>
-                                                        <TableCell align="center"><strong>Quantidade</strong></TableCell>
-                                                        <TableCell align="center"><strong>Preço Total</strong></TableCell>
-                                                        <TableCell align="center"><strong>Data</strong></TableCell>
+                                                        <TableCell>
+                                                            <strong>Produto</strong>
+                                                        </TableCell>
+                                                        <TableCell align="center">
+                                                            <strong>Quantidade</strong>
+                                                        </TableCell>
+                                                        <TableCell align="center">
+                                                            <strong>Preço Total</strong>
+                                                        </TableCell>
+                                                        <TableCell align="center">
+                                                            <strong>Data</strong>
+                                                        </TableCell>
                                                     </TableRow>
                                                 </TableHead>
                                                 <TableBody>
@@ -201,7 +259,9 @@ const AdminReports = () => {
                                                         <TableRow key={i}>
                                                             <TableCell>{s.productName}</TableCell>
                                                             <TableCell align="center">{s.quantitySold}</TableCell>
-                                                            <TableCell align="center">R${s.totalPrice.toFixed(2)}</TableCell>
+                                                            <TableCell align="center">
+                                                                R${s.totalPrice.toFixed(2)}
+                                                            </TableCell>
                                                             <TableCell align="center">
                                                                 {parseSaleDate(s.saleDate).format('DD/MM/YYYY')}
                                                             </TableCell>
@@ -216,7 +276,9 @@ const AdminReports = () => {
                                                 rowsPerPage={rowsPerPage}
                                                 page={page}
                                                 onPageChange={(e, p) => handleChangePage(id, p)}
-                                                onRowsPerPageChange={(e) => handleChangeRowsPerPage(id, e.target.value)}
+                                                onRowsPerPageChange={(e) =>
+                                                    handleChangeRowsPerPage(id, e.target.value)
+                                                }
                                                 labelRowsPerPage="Linhas por página"
                                             />
                                         </TableContainer>
