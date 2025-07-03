@@ -1,49 +1,63 @@
+// src/pages/Dashboard.jsx
 import React, { useEffect, useState } from 'react';
-import { Box, Typography, Paper, Grid, Button } from '@mui/material';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+dayjs.extend(utc);
+
+import {
+    Box,
+    Typography,
+    Paper,
+    Grid,
+    Button,
+} from '@mui/material';
+import {
+    Inventory2Outlined,
+    AddShoppingCartOutlined,
+    HistoryOutlined,
+} from '@mui/icons-material';
+
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import api from '../services/api';
-import { Inventory2Outlined, AddShoppingCartOutlined, HistoryOutlined } from '@mui/icons-material';
+
+/* Converte qualquer saleDate (Date do Parse) para dayjs no fuso local */
+const parseSaleDate = (d) => dayjs.utc(d?.iso ?? d).local();
 
 const Dashboard = () => {
     const [userName, setUserName] = useState('');
     const [monthlySales, setMonthlySales] = useState(0);
     const navigate = useNavigate();
 
+    /* ---------- carrega vendas do mês ---------- */
     const fetchDashboardData = async () => {
         try {
-            const fullname = localStorage.getItem('fullname');
-            setUserName(fullname || 'Revendedor');
+            setUserName(localStorage.getItem('fullname') || 'Revendedor');
 
-            const response = await api.post('/functions/list-sales-by-user', {}, {
-                headers: {
-                    'X-Parse-Session-Token': localStorage.getItem('sessionToken'),
-                },
-            });
+            const { data } = await api.post(
+                '/functions/list-sales-by-user',
+                {},
+                { headers: { 'X-Parse-Session-Token': localStorage.getItem('sessionToken') } },
+            );
 
-            const salesArray = response.data.result;
-            const currentMonth = new Date().getMonth();
+            const sales = data.result || [];
+            const monthIndex = dayjs().month(); // mês atual (0-11) no fuso local
 
-            const filteredSales = salesArray.filter((sale) => {
-                const saleDate = new Date(sale.saleDate.iso);
-                return saleDate.getMonth() === currentMonth;
-            });
+            const total = sales
+                .filter((s) => parseSaleDate(s.saleDate).month() === monthIndex)
+                .reduce((sum, s) => sum + (s.quantitySold || 0), 0);
 
-            const totalProductsSold = filteredSales.reduce((acc, sale) => acc + sale.quantitySold, 0);
-            setMonthlySales(totalProductsSold);
+            setMonthlySales(total);
         } catch (err) {
             console.error('Erro ao buscar dados do dashboard:', err);
         }
     };
 
-    useEffect(() => {
-        fetchDashboardData();
-    }, []);
+    useEffect(() => { fetchDashboardData(); }, []);
 
-    const handleNavigation = (path) => {
-        navigate(path);
-    };
+    const handleNavigation = (path) => navigate(path);
 
+    /* ---------- UI ---------- */
     return (
         <Box
             sx={{
@@ -63,14 +77,14 @@ const Dashboard = () => {
                     alignItems: 'center',
                     justifyContent: 'center',
                     textAlign: 'center',
-                    padding: '16px',
+                    p: 2,
                     height: 'calc(100vh - 64px)',
                 }}
             >
                 <Typography
                     variant="h3"
                     sx={{
-                        marginBottom: '24px',
+                        mb: 3,
                         fontFamily: "'Dancing Script', cursive",
                         fontWeight: 'bold',
                         color: '#FF1493',
@@ -82,25 +96,21 @@ const Dashboard = () => {
                 <Paper
                     elevation={3}
                     sx={{
-                        padding: '24px',
-                        marginBottom: '24px',
+                        p: 3,
+                        mb: 3,
                         width: '100%',
-                        maxWidth: '500px',
+                        maxWidth: 500,
                         backgroundColor: '#fff0f5',
-                        borderRadius: '12px',
+                        borderRadius: 2,
                     }}
                 >
                     <Typography variant="h6">Vendas deste mês</Typography>
-                    <Typography
-                        variant="h3"
-                        color="primary"
-                        sx={{ marginTop: '8px', fontWeight: 'bold' }}
-                    >
+                    <Typography variant="h3" color="primary" sx={{ mt: 1, fontWeight: 'bold' }}>
                         {monthlySales}
                     </Typography>
                 </Paper>
 
-                <Grid container spacing={3} sx={{ maxWidth: '500px' }}>
+                <Grid container spacing={3} sx={{ maxWidth: 500 }}>
                     <Grid item xs={12} sm={6}>
                         <Button
                             variant="contained"
@@ -109,17 +119,16 @@ const Dashboard = () => {
                             startIcon={<Inventory2Outlined />}
                             onClick={() => handleNavigation('/stock')}
                             sx={{
-                                padding: '12px',
-                                borderRadius: '8px',
+                                py: 1.5,
+                                borderRadius: 1,
                                 fontWeight: 'bold',
-                                '&:hover': {
-                                    backgroundColor: '#1976d2',
-                                },
+                                '&:hover': { backgroundColor: '#1976d2' },
                             }}
                         >
                             Ver Estoque
                         </Button>
                     </Grid>
+
                     <Grid item xs={12} sm={6}>
                         <Button
                             variant="contained"
@@ -128,17 +137,16 @@ const Dashboard = () => {
                             startIcon={<AddShoppingCartOutlined />}
                             onClick={() => handleNavigation('/new-sale')}
                             sx={{
-                                padding: '12px',
-                                borderRadius: '8px',
+                                py: 1.5,
+                                borderRadius: 1,
                                 fontWeight: 'bold',
-                                '&:hover': {
-                                    backgroundColor: '#7b1fa2',
-                                },
+                                '&:hover': { backgroundColor: '#7b1fa2' },
                             }}
                         >
                             Nova Venda
                         </Button>
                     </Grid>
+
                     <Grid item xs={12}>
                         <Button
                             variant="contained"
@@ -147,12 +155,10 @@ const Dashboard = () => {
                             startIcon={<HistoryOutlined />}
                             onClick={() => handleNavigation('/sales-history')}
                             sx={{
-                                padding: '12px',
-                                borderRadius: '8px',
+                                py: 1.5,
+                                borderRadius: 1,
                                 fontWeight: 'bold',
-                                '&:hover': {
-                                    backgroundColor: '#388e3c',
-                                },
+                                '&:hover': { backgroundColor: '#388e3c' },
                             }}
                         >
                             Histórico de Vendas
