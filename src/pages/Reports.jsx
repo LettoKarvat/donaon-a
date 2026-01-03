@@ -21,6 +21,10 @@ import {
     TableCell,
     TableBody,
     TablePagination,
+    FormControl,
+    InputLabel,
+    Select,
+    MenuItem,
 } from '@mui/material';
 
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -49,6 +53,26 @@ const mergeMonthlyReports = (arrays) => {
     return merged;
 };
 
+/* gera lista de anos disponíveis (de 2024 até o ano atual) */
+const getAvailableYears = () => {
+    const currentYear = dayjs().year();
+    const startYear = 2024;
+    const years = [];
+    for (let y = currentYear; y >= startYear; y--) {
+        years.push(y);
+    }
+    return years;
+};
+
+/* calcula data fim padrão para um ano */
+const getDefaultEndDate = (year) => {
+    const currentYear = dayjs().year();
+    if (year < currentYear) {
+        return dayjs(`${year}-12-31`).endOf('day');
+    }
+    return dayjs().endOf('day');
+};
+
 const AdminReports = () => {
     const [reports, setReports] = useState({});
     const [filteredReports, setFilteredReports] = useState({});
@@ -56,99 +80,159 @@ const AdminReports = () => {
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    /* —— datas: primeiro dia do mês até hoje —— */
-    const [startDate, setStartDate] = useState(dayjs().startOf('month'));
+    /* —— Seletor de ano —— */
+    const [selectedYear, setSelectedYear] = useState(dayjs().year());
+    const availableYears = useMemo(() => getAvailableYears(), []);
+
+    /* —— datas —— */
+    const [startDate, setStartDate] = useState(dayjs().startOf('year'));
     const [endDate, setEndDate] = useState(dayjs().endOf('day'));
 
     const [pageState, setPageState] = useState({});
     const navigate = useNavigate();
 
-    /* ---------------- fetch de janeiro até o mês corrente ---------------- */
-    const fetchReports = async () => {
+    /* ---------------- aplicar filtros ---------------- */
+    const applyFilters = (term, dIni, dFim, base) => {
+        console.log('[Reports] Aplicando filtros:', {
+            termo: term,
+            dataInicio: dIni?.format('DD/MM/YYYY'),
+            dataFim: dFim?.format('DD/MM/YYYY'),
+            totalRevendedores: Object.keys(base).length
+        });
+
+        const filtered = Object.entries(base).reduce((acc, [name, rep]) => {
+            // Filtro por nome
+            if (!name.toLowerCase().includes(term.toLowerCase())) {
+                return acc;
+            }
+
+            // Filtro por data
+            const filteredSales = rep.salesDetails.filter((s) => {
+                const saleDate = parseSaleDate(s.saleDate);
+                const isInRange = saleDate.isBetween(dIni, dFim, 'day', '[]');
+                return isInRange;
+            });
+
+            // Inclui se tem vendas no período OU se está buscando por nome específico
+            if (filteredSales.length > 0) {
+                acc[name] = { ...rep, salesDetails: filteredSales };
+            }
+
+            return acc;
+        }, {});
+
+        console.log('[Reports] Após filtros:', Object.keys(filtered).length, 'revendedores');
+        setFilteredReports(filtered);
+    };
+
+    /* ---------------- fetch de todos os meses do ano selecionado ---------------- */
+    const fetchReports = async (year, filterStartDate, filterEndDate) => {
         const sessionToken = localStorage.getItem('sessionToken');
         if (!sessionToken) return setError('Sessão expirada. Faça login novamente.');
 
         try {
             setLoading(true);
+            setError('');
             const headers = { 'X-Parse-Session-Token': sessionToken };
-            const year = dayjs().year();
-            const currentMonth = dayjs().month() + 1; // 1-based
 
-            const months = Array.from({ length: currentMonth }, (_, i) => i + 1);
+            const currentYear = dayjs().year();
+            const currentMonth = dayjs().month() + 1;
+
+            // Se for o ano atual, busca até o mês atual; senão, busca todos os 12 meses
+            const maxMonth = year === currentYear ? currentMonth : 12;
+            const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
+
+            console.log(`[Reports] Buscando dados de ${year}, meses 1 a ${maxMonth}`);
 
             /* faz todas as chamadas em paralelo */
             const monthlyData = await Promise.all(
                 months.map(async (m) => {
-                    const { data } = await api.post(
-                        '/functions/gett-admin-reports',
-                        { month: m, year },
-                        { headers },
-                    );
-                    return data.result || {};
+                    try {
+                        const { data } = await api.post(
+                            '/functions/gett-admin-reports',
+                            { month: m, year },
+                            { headers },
+                        );
+                        console.log(`[Reports] Mês ${m}/${year}:`, Object.keys(data.result || {}).length, 'revendedores');
+                        return data.result || {};
+                    } catch (err) {
+                        console.error(`[Reports] Erro no mês ${m}/${year}:`, err);
+                        return {};
+                    }
                 }),
             );
 
             /* junta tudo */
             const merged = mergeMonthlyReports(monthlyData);
+            console.log('[Reports] Total revendedores encontrados:', Object.keys(merged).length);
+
             setReports(merged);
-            applyFilters(searchTerm, startDate, endDate, merged);
-            setLoading(false);
+
+            // Usa as datas passadas como parâmetro (não o state que pode estar desatualizado)
+            applyFilters(searchTerm, filterStartDate, filterEndDate, merged);
+
         } catch (err) {
             console.error(err);
             setError('Erro ao carregar os relatórios.');
+        } finally {
             setLoading(false);
         }
     };
 
+    /* Atualiza quando o ano selecionado muda */
     useEffect(() => {
-        fetchReports();
+        // Calcula as novas datas
+        const newStartDate = dayjs(`${selectedYear}-01-01`).startOf('day');
+        const newEndDate = getDefaultEndDate(selectedYear);
+
+        console.log('[Reports] Ano selecionado:', selectedYear);
+        console.log('[Reports] Período:', newStartDate.format('DD/MM/YYYY'), 'até', newEndDate.format('DD/MM/YYYY'));
+
+        // Atualiza o state das datas
+        setStartDate(newStartDate);
+        setEndDate(newEndDate);
+
+        // Passa as datas calculadas diretamente para o fetch (não depende do state)
+        fetchReports(selectedYear, newStartDate, newEndDate);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [selectedYear]);
 
     /* ---------------- helpers ---------------- */
     const calcTotals = (sales) =>
         sales.reduce(
             (tot, s) => {
-                const d = parseSaleDate(s.saleDate);
-                if (d.isBetween(startDate, endDate, null, '[]')) {
-                    tot.totalSales += s.quantitySold;
-                    tot.totalRevenue += s.totalPrice;
-                }
+                tot.totalSales += s.quantitySold || 0;
+                tot.totalRevenue += s.totalPrice || 0;
                 return tot;
             },
             { totalSales: 0, totalRevenue: 0 },
         );
 
-    const applyFilters = (term, dIni, dFim, base = reports) => {
-        const filtered = Object.entries(base).reduce((acc, [name, rep]) => {
-            if (name.toLowerCase().includes(term.toLowerCase())) {
-                const filteredSales = rep.salesDetails.filter((s) =>
-                    parseSaleDate(s.saleDate).isBetween(dIni, dFim, null, '[]'),
-                );
-                acc[name] = { ...rep, salesDetails: filteredSales };
-            }
-            return acc;
-        }, {});
-        setFilteredReports(filtered);
+    /* ---------------- handlers ---------------- */
+    const handleYearChange = (e) => {
+        setSelectedYear(e.target.value);
     };
 
-    /* ---------------- handlers ---------------- */
     const handleSearch = (e) => {
         const term = e.target.value;
         setSearchTerm(term);
-        applyFilters(term, startDate, endDate);
+        applyFilters(term, startDate, endDate, reports);
     };
 
     const handleStartDateChange = (d) => {
         const newStart = d ? d.startOf('day') : null;
         setStartDate(newStart);
-        applyFilters(searchTerm, newStart, endDate);
+        if (newStart && endDate) {
+            applyFilters(searchTerm, newStart, endDate, reports);
+        }
     };
 
     const handleEndDateChange = (d) => {
         const newEnd = d ? d.endOf('day') : null;
         setEndDate(newEnd);
-        applyFilters(searchTerm, startDate, newEnd);
+        if (startDate && newEnd) {
+            applyFilters(searchTerm, startDate, newEnd, reports);
+        }
     };
 
     const handleViewDetails = (id) => navigate(`/admin/reports/${id}`);
@@ -172,8 +256,19 @@ const AdminReports = () => {
                         ? a.name.localeCompare(b.name)
                         : b.totalSales - a.totalSales,
                 ),
-        [filteredReports, startDate, endDate],
+        [filteredReports],
     );
+
+    /* Calcula totais gerais */
+    const grandTotals = useMemo(() => {
+        return sortedResellers.reduce(
+            (acc, { totalSales, totalRevenue }) => ({
+                totalSales: acc.totalSales + totalSales,
+                totalRevenue: acc.totalRevenue + totalRevenue,
+            }),
+            { totalSales: 0, totalRevenue: 0 }
+        );
+    }, [sortedResellers]);
 
     /* ---------------- UI ---------------- */
     return (
@@ -193,14 +288,37 @@ const AdminReports = () => {
                     </Typography>
 
                     {loading ? (
-                        <CircularProgress />
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                            <CircularProgress />
+                            <Typography variant="body2" color="textSecondary">
+                                Carregando dados de {selectedYear}...
+                            </Typography>
+                        </Box>
                     ) : error ? (
                         <Alert severity="error">{error}</Alert>
                     ) : (
                         <Paper sx={{ p: 2, width: '100%', maxWidth: 900 }}>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+                            {/* Filtros */}
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, alignItems: 'center' }}>
+                                {/* Seletor de Ano */}
+                                <FormControl sx={{ minWidth: 120 }}>
+                                    <InputLabel id="year-select-label">Ano</InputLabel>
+                                    <Select
+                                        labelId="year-select-label"
+                                        value={selectedYear}
+                                        label="Ano"
+                                        onChange={handleYearChange}
+                                    >
+                                        {availableYears.map((year) => (
+                                            <MenuItem key={year} value={year}>
+                                                {year}
+                                            </MenuItem>
+                                        ))}
+                                    </Select>
+                                </FormControl>
+
                                 <TextField
-                                    fullWidth
+                                    sx={{ flex: 1, minWidth: 200 }}
                                     label="Buscar Revendedor"
                                     value={searchTerm}
                                     onChange={handleSearch}
@@ -219,6 +337,53 @@ const AdminReports = () => {
                                 />
                             </Box>
 
+                            {/* Resumo Geral */}
+                            <Paper
+                                elevation={2}
+                                sx={{
+                                    p: 2,
+                                    mb: 3,
+                                    backgroundColor: '#e3f2fd',
+                                    display: 'flex',
+                                    justifyContent: 'space-around',
+                                    flexWrap: 'wrap',
+                                    gap: 2
+                                }}
+                            >
+                                <Box sx={{ textAlign: 'center' }}>
+                                    <Typography variant="body2" color="textSecondary">
+                                        Total Revendedores
+                                    </Typography>
+                                    <Typography variant="h5" color="primary">
+                                        {sortedResellers.length}
+                                    </Typography>
+                                </Box>
+                                <Box sx={{ textAlign: 'center' }}>
+                                    <Typography variant="body2" color="textSecondary">
+                                        Total de Vendas
+                                    </Typography>
+                                    <Typography variant="h5" color="primary">
+                                        {grandTotals.totalSales}
+                                    </Typography>
+                                </Box>
+                                <Box sx={{ textAlign: 'center' }}>
+                                    <Typography variant="body2" color="textSecondary">
+                                        Receita Total
+                                    </Typography>
+                                    <Typography variant="h5" color="primary">
+                                        R${grandTotals.totalRevenue.toFixed(2)}
+                                    </Typography>
+                                </Box>
+                            </Paper>
+
+                            {/* Lista vazia */}
+                            {sortedResellers.length === 0 && (
+                                <Alert severity="info" sx={{ mb: 3 }}>
+                                    Nenhuma venda encontrada para o período selecionado em {selectedYear}.
+                                </Alert>
+                            )}
+
+                            {/* Lista de Revendedores */}
                             {sortedResellers.map(({ name, rep, totalSales, totalRevenue }) => {
                                 const id = rep.resellerId;
                                 const { page = 0, rowsPerPage = 10 } = pageState[id] || {};
@@ -236,52 +401,58 @@ const AdminReports = () => {
                                             <strong>Receita Total:</strong> R${totalRevenue.toFixed(2)}
                                         </Typography>
 
-                                        <TableContainer component={Paper} sx={{ mt: 2 }}>
-                                            <Table>
-                                                <TableHead>
-                                                    <TableRow>
-                                                        <TableCell>
-                                                            <strong>Produto</strong>
-                                                        </TableCell>
-                                                        <TableCell align="center">
-                                                            <strong>Quantidade</strong>
-                                                        </TableCell>
-                                                        <TableCell align="center">
-                                                            <strong>Preço Total</strong>
-                                                        </TableCell>
-                                                        <TableCell align="center">
-                                                            <strong>Data</strong>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                </TableHead>
-                                                <TableBody>
-                                                    {paginated.map((s, i) => (
-                                                        <TableRow key={i}>
-                                                            <TableCell>{s.productName}</TableCell>
-                                                            <TableCell align="center">{s.quantitySold}</TableCell>
-                                                            <TableCell align="center">
-                                                                R${s.totalPrice.toFixed(2)}
+                                        {rep.salesDetails.length > 0 ? (
+                                            <TableContainer component={Paper} sx={{ mt: 2 }}>
+                                                <Table>
+                                                    <TableHead>
+                                                        <TableRow>
+                                                            <TableCell>
+                                                                <strong>Produto</strong>
                                                             </TableCell>
                                                             <TableCell align="center">
-                                                                {parseSaleDate(s.saleDate).format('DD/MM/YYYY')}
+                                                                <strong>Quantidade</strong>
+                                                            </TableCell>
+                                                            <TableCell align="center">
+                                                                <strong>Preço Total</strong>
+                                                            </TableCell>
+                                                            <TableCell align="center">
+                                                                <strong>Data</strong>
                                                             </TableCell>
                                                         </TableRow>
-                                                    ))}
-                                                </TableBody>
-                                            </Table>
+                                                    </TableHead>
+                                                    <TableBody>
+                                                        {paginated.map((s, i) => (
+                                                            <TableRow key={i}>
+                                                                <TableCell>{s.productName}</TableCell>
+                                                                <TableCell align="center">{s.quantitySold}</TableCell>
+                                                                <TableCell align="center">
+                                                                    R${(s.totalPrice || 0).toFixed(2)}
+                                                                </TableCell>
+                                                                <TableCell align="center">
+                                                                    {parseSaleDate(s.saleDate).format('DD/MM/YYYY')}
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
 
-                                            <TablePagination
-                                                rowsPerPageOptions={[5, 10, 25]}
-                                                count={rep.salesDetails.length}
-                                                rowsPerPage={rowsPerPage}
-                                                page={page}
-                                                onPageChange={(e, p) => handleChangePage(id, p)}
-                                                onRowsPerPageChange={(e) =>
-                                                    handleChangeRowsPerPage(id, e.target.value)
-                                                }
-                                                labelRowsPerPage="Linhas por página"
-                                            />
-                                        </TableContainer>
+                                                <TablePagination
+                                                    rowsPerPageOptions={[5, 10, 25]}
+                                                    count={rep.salesDetails.length}
+                                                    rowsPerPage={rowsPerPage}
+                                                    page={page}
+                                                    onPageChange={(e, p) => handleChangePage(id, p)}
+                                                    onRowsPerPageChange={(e) =>
+                                                        handleChangeRowsPerPage(id, e.target.value)
+                                                    }
+                                                    labelRowsPerPage="Linhas por página"
+                                                />
+                                            </TableContainer>
+                                        ) : (
+                                            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                                                Sem vendas no período selecionado.
+                                            </Typography>
+                                        )}
                                     </Box>
                                 );
                             })}
