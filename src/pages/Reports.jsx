@@ -21,7 +21,20 @@ import {
     TableCell,
     TableBody,
     TablePagination,
+    Chip,
+    IconButton,
+    Tooltip,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    Snackbar,
 } from '@mui/material';
+
+import {
+    Cancel as CancelIcon,
+    Undo as UndoIcon,
+} from '@mui/icons-material';
 
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers';
@@ -66,22 +79,21 @@ const AdminReports = () => {
     const [pageState, setPageState] = useState({});
     const navigate = useNavigate();
 
+    /* —— Modal de cancelamento —— */
+    const [cancelDialog, setCancelDialog] = useState({ open: false, sale: null });
+    const [cancelReason, setCancelReason] = useState('');
+    const [cancelling, setCancelling] = useState(false);
+
+    /* —— Snackbar de feedback —— */
+    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+
     /* ---------------- aplicar filtros ---------------- */
     const applyFilters = useCallback((term, dIni, dFim, base) => {
-        console.log('[Reports] Aplicando filtros:', {
-            termo: term,
-            dataInicio: dIni?.format('DD/MM/YYYY'),
-            dataFim: dFim?.format('DD/MM/YYYY'),
-            totalRevendedores: Object.keys(base).length
-        });
-
         const filtered = Object.entries(base).reduce((acc, [name, rep]) => {
-            // Filtro por nome
             if (!name.toLowerCase().includes(term.toLowerCase())) {
                 return acc;
             }
 
-            // Filtro por data
             const filteredSales = rep.salesDetails.filter((s) => {
                 const saleDate = parseSaleDate(s.saleDate);
                 return saleDate.isBetween(dIni, dFim, 'day', '[]');
@@ -94,7 +106,6 @@ const AdminReports = () => {
             return acc;
         }, {});
 
-        console.log('[Reports] Após filtros:', Object.keys(filtered).length, 'revendedores');
         setFilteredReports(filtered);
     }, []);
 
@@ -126,14 +137,6 @@ const AdminReports = () => {
             setError('');
             const headers = { 'X-Parse-Session-Token': sessionToken };
 
-            // Calcula quais anos/meses precisamos buscar
-            const startYear = dIni.year();
-            const startMonth = dIni.month() + 1; // 1-based
-            const endYear = dFim.year();
-            const endMonth = dFim.month() + 1;
-
-            console.log(`[Reports] Buscando de ${startMonth}/${startYear} até ${endMonth}/${endYear}`);
-
             // Gera lista de todos os meses que precisamos buscar
             const monthsToFetch = [];
             let currentDate = dIni.startOf('month');
@@ -147,8 +150,6 @@ const AdminReports = () => {
                 currentDate = currentDate.add(1, 'month');
             }
 
-            console.log('[Reports] Meses a buscar:', monthsToFetch);
-
             // Busca todos os meses em paralelo
             const monthlyData = await Promise.all(
                 monthsToFetch.map(({ year, month }) =>
@@ -158,7 +159,6 @@ const AdminReports = () => {
 
             // Junta tudo
             const merged = mergeReports(monthlyData);
-            console.log('[Reports] Total revendedores encontrados:', Object.keys(merged).length);
 
             setReports(merged);
             applyFilters(searchTerm, dIni, dFim, merged);
@@ -177,7 +177,85 @@ const AdminReports = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    /* ---------------- handlers ---------------- */
+    /* ---------------- CANCELAR VENDA ---------------- */
+    const handleOpenCancelDialog = (sale, resellerName) => {
+        setCancelDialog({ open: true, sale: { ...sale, resellerName } });
+        setCancelReason('');
+    };
+
+    const handleCloseCancelDialog = () => {
+        setCancelDialog({ open: false, sale: null });
+        setCancelReason('');
+    };
+
+    const handleCancelSale = async () => {
+        if (!cancelDialog.sale) return;
+
+        const sessionToken = localStorage.getItem('sessionToken');
+        setCancelling(true);
+
+        try {
+            await api.post(
+                '/functions/cancel-sale',
+                {
+                    saleId: cancelDialog.sale.saleId,
+                    reason: cancelReason || 'Cancelado pelo administrador'
+                },
+                { headers: { 'X-Parse-Session-Token': sessionToken } }
+            );
+
+            setSnackbar({
+                open: true,
+                message: 'Venda cancelada com sucesso! Estoque devolvido ao revendedor.',
+                severity: 'success'
+            });
+
+            // Recarrega os dados
+            fetchReports(startDate, endDate);
+            handleCloseCancelDialog();
+
+        } catch (err) {
+            console.error('Erro ao cancelar venda:', err);
+            setSnackbar({
+                open: true,
+                message: err.response?.data?.error || 'Erro ao cancelar venda.',
+                severity: 'error'
+            });
+        } finally {
+            setCancelling(false);
+        }
+    };
+
+    /* ---------------- DESFAZER CANCELAMENTO ---------------- */
+    const handleUndoCancel = async (saleId) => {
+        const sessionToken = localStorage.getItem('sessionToken');
+
+        try {
+            await api.post(
+                '/functions/undo-cancel-sale',
+                { saleId },
+                { headers: { 'X-Parse-Session-Token': sessionToken } }
+            );
+
+            setSnackbar({
+                open: true,
+                message: 'Cancelamento desfeito! Venda restaurada.',
+                severity: 'success'
+            });
+
+            fetchReports(startDate, endDate);
+
+        } catch (err) {
+            console.error('Erro ao desfazer cancelamento:', err);
+            setSnackbar({
+                open: true,
+                message: err.response?.data?.error || 'Erro ao desfazer cancelamento.',
+                severity: 'error'
+            });
+        }
+    };
+
+    /* ---------------- handlers de filtro ---------------- */
     const handleSearch = (e) => {
         const term = e.target.value;
         setSearchTerm(term);
@@ -189,7 +267,6 @@ const AdminReports = () => {
         const newStart = d.startOf('day');
         setStartDate(newStart);
 
-        // Se a nova data inicial é de um ano/mês diferente, rebusca os dados
         const needsRefetch = newStart.year() !== startDate.year() ||
             newStart.month() !== startDate.month();
 
@@ -205,7 +282,6 @@ const AdminReports = () => {
         const newEnd = d.endOf('day');
         setEndDate(newEnd);
 
-        // Se a nova data final é de um ano/mês diferente, rebusca os dados
         const needsRefetch = newEnd.year() !== endDate.year() ||
             newEnd.month() !== endDate.month();
 
@@ -226,14 +302,16 @@ const AdminReports = () => {
 
     /* ---------------- helpers de cálculo ---------------- */
     const calcTotals = (sales) =>
-        sales.reduce(
-            (tot, s) => {
-                tot.totalSales += s.quantitySold || 0;
-                tot.totalRevenue += s.totalPrice || 0;
-                return tot;
-            },
-            { totalSales: 0, totalRevenue: 0 },
-        );
+        sales
+            .filter(s => !s.isCancelled) // Só conta vendas ATIVAS
+            .reduce(
+                (tot, s) => {
+                    tot.totalSales += s.quantitySold || 0;
+                    tot.totalRevenue += s.totalPrice || 0;
+                    return tot;
+                },
+                { totalSales: 0, totalRevenue: 0 },
+            );
 
     /* ordena por total de vendas no período */
     const sortedResellers = useMemo(
@@ -274,7 +352,6 @@ const AdminReports = () => {
         let yPos = 40;
 
         sortedResellers.forEach(({ name, rep, totalSales, totalRevenue }) => {
-            // Verifica se precisa de nova página
             if (yPos > 250) {
                 doc.addPage();
                 yPos = 20;
@@ -284,12 +361,13 @@ const AdminReports = () => {
             doc.text(`${name} - Vendas: ${totalSales} | Receita: R$${totalRevenue.toFixed(2)}`, 14, yPos);
             yPos += 8;
 
-            const tableColumn = ['Produto', 'Qtd', 'Preço', 'Data'];
+            const tableColumn = ['Produto', 'Qtd', 'Preço', 'Data', 'Status'];
             const tableRows = rep.salesDetails.map((s) => [
                 s.productName,
                 s.quantitySold,
                 `R$${(s.totalPrice || 0).toFixed(2)}`,
                 parseSaleDate(s.saleDate).format('DD/MM/YYYY'),
+                s.isCancelled ? 'CANCELADA' : 'OK',
             ]);
 
             doc.autoTable({
@@ -334,7 +412,7 @@ const AdminReports = () => {
                     ) : error ? (
                         <Alert severity="error">{error}</Alert>
                     ) : (
-                        <Paper sx={{ p: 2, width: '100%', maxWidth: 900 }}>
+                        <Paper sx={{ p: 2, width: '100%', maxWidth: 1000 }}>
                             {/* Filtros */}
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, alignItems: 'center' }}>
                                 <DatePicker
@@ -431,33 +509,83 @@ const AdminReports = () => {
 
                                         {rep.salesDetails.length > 0 ? (
                                             <TableContainer component={Paper} sx={{ mt: 2 }}>
-                                                <Table>
+                                                <Table size="small">
                                                     <TableHead>
                                                         <TableRow>
-                                                            <TableCell>
-                                                                <strong>Produto</strong>
-                                                            </TableCell>
-                                                            <TableCell align="center">
-                                                                <strong>Quantidade</strong>
-                                                            </TableCell>
-                                                            <TableCell align="center">
-                                                                <strong>Preço Total</strong>
-                                                            </TableCell>
-                                                            <TableCell align="center">
-                                                                <strong>Data</strong>
-                                                            </TableCell>
+                                                            <TableCell><strong>Produto</strong></TableCell>
+                                                            <TableCell align="center"><strong>Qtd</strong></TableCell>
+                                                            <TableCell align="center"><strong>Preço</strong></TableCell>
+                                                            <TableCell align="center"><strong>Data</strong></TableCell>
+                                                            <TableCell align="center"><strong>Status</strong></TableCell>
+                                                            <TableCell align="center"><strong>Ações</strong></TableCell>
                                                         </TableRow>
                                                     </TableHead>
                                                     <TableBody>
                                                         {paginated.map((s, i) => (
-                                                            <TableRow key={i}>
-                                                                <TableCell>{s.productName}</TableCell>
-                                                                <TableCell align="center">{s.quantitySold}</TableCell>
-                                                                <TableCell align="center">
+                                                            <TableRow
+                                                                key={i}
+                                                                sx={{
+                                                                    backgroundColor: s.isCancelled ? '#ffebee' : 'inherit',
+                                                                    opacity: s.isCancelled ? 0.7 : 1,
+                                                                }}
+                                                            >
+                                                                <TableCell
+                                                                    sx={{
+                                                                        textDecoration: s.isCancelled ? 'line-through' : 'none',
+                                                                    }}
+                                                                >
+                                                                    {s.productName}
+                                                                </TableCell>
+                                                                <TableCell
+                                                                    align="center"
+                                                                    sx={{ textDecoration: s.isCancelled ? 'line-through' : 'none' }}
+                                                                >
+                                                                    {s.quantitySold}
+                                                                </TableCell>
+                                                                <TableCell
+                                                                    align="center"
+                                                                    sx={{ textDecoration: s.isCancelled ? 'line-through' : 'none' }}
+                                                                >
                                                                     R${(s.totalPrice || 0).toFixed(2)}
                                                                 </TableCell>
                                                                 <TableCell align="center">
                                                                     {parseSaleDate(s.saleDate).format('DD/MM/YYYY')}
+                                                                </TableCell>
+                                                                <TableCell align="center">
+                                                                    {s.isCancelled ? (
+                                                                        <Tooltip title={`Cancelado por: ${s.cancelledBy || 'Admin'}\nMotivo: ${s.cancellationReason || '-'}`}>
+                                                                            <Chip
+                                                                                label="CANCELADA"
+                                                                                color="error"
+                                                                                size="small"
+                                                                            />
+                                                                        </Tooltip>
+                                                                    ) : (
+                                                                        <Chip label="OK" color="success" size="small" />
+                                                                    )}
+                                                                </TableCell>
+                                                                <TableCell align="center">
+                                                                    {s.isCancelled ? (
+                                                                        <Tooltip title="Desfazer cancelamento">
+                                                                            <IconButton
+                                                                                size="small"
+                                                                                color="primary"
+                                                                                onClick={() => handleUndoCancel(s.saleId)}
+                                                                            >
+                                                                                <UndoIcon fontSize="small" />
+                                                                            </IconButton>
+                                                                        </Tooltip>
+                                                                    ) : (
+                                                                        <Tooltip title="Cancelar venda">
+                                                                            <IconButton
+                                                                                size="small"
+                                                                                color="error"
+                                                                                onClick={() => handleOpenCancelDialog(s, name)}
+                                                                            >
+                                                                                <CancelIcon fontSize="small" />
+                                                                            </IconButton>
+                                                                        </Tooltip>
+                                                                    )}
                                                                 </TableCell>
                                                             </TableRow>
                                                         ))}
@@ -487,6 +615,77 @@ const AdminReports = () => {
                         </Paper>
                     )}
                 </Box>
+
+                {/* Dialog de Cancelamento */}
+                <Dialog open={cancelDialog.open} onClose={handleCloseCancelDialog} maxWidth="sm" fullWidth>
+                    <DialogTitle sx={{ color: 'error.main' }}>
+                        Cancelar Venda
+                    </DialogTitle>
+                    <DialogContent>
+                        {cancelDialog.sale && (
+                            <Box sx={{ mb: 2 }}>
+                                <Typography variant="body1" gutterBottom>
+                                    <strong>Revendedor:</strong> {cancelDialog.sale.resellerName}
+                                </Typography>
+                                <Typography variant="body1" gutterBottom>
+                                    <strong>Produto:</strong> {cancelDialog.sale.productName}
+                                </Typography>
+                                <Typography variant="body1" gutterBottom>
+                                    <strong>Quantidade:</strong> {cancelDialog.sale.quantitySold}
+                                </Typography>
+                                <Typography variant="body1" gutterBottom>
+                                    <strong>Valor:</strong> R${(cancelDialog.sale.totalPrice || 0).toFixed(2)}
+                                </Typography>
+                                <Typography variant="body1" gutterBottom>
+                                    <strong>Data:</strong> {parseSaleDate(cancelDialog.sale.saleDate).format('DD/MM/YYYY')}
+                                </Typography>
+                            </Box>
+                        )}
+
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                            Ao cancelar, {cancelDialog.sale?.quantitySold || 0} unidades serão devolvidas ao estoque do revendedor.
+                        </Alert>
+
+                        <TextField
+                            label="Motivo do cancelamento (opcional)"
+                            fullWidth
+                            multiline
+                            rows={2}
+                            value={cancelReason}
+                            onChange={(e) => setCancelReason(e.target.value)}
+                            placeholder="Ex: Cliente desistiu, erro de registro..."
+                        />
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={handleCloseCancelDialog} disabled={cancelling}>
+                            Voltar
+                        </Button>
+                        <Button
+                            onClick={handleCancelSale}
+                            color="error"
+                            variant="contained"
+                            disabled={cancelling}
+                        >
+                            {cancelling ? <CircularProgress size={20} /> : 'Confirmar Cancelamento'}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
+
+                {/* Snackbar de feedback */}
+                <Snackbar
+                    open={snackbar.open}
+                    autoHideDuration={4000}
+                    onClose={() => setSnackbar({ ...snackbar, open: false })}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                >
+                    <Alert
+                        onClose={() => setSnackbar({ ...snackbar, open: false })}
+                        severity={snackbar.severity}
+                        sx={{ width: '100%' }}
+                    >
+                        {snackbar.message}
+                    </Alert>
+                </Snackbar>
             </Box>
         </LocalizationProvider>
     );
