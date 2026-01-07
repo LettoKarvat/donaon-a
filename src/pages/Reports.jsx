@@ -1,5 +1,5 @@
 // src/pages/Reports.jsx
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import dayjs from 'dayjs';
 import isBetween from 'dayjs/plugin/isBetween';
 import utc from 'dayjs/plugin/utc';
@@ -21,10 +21,6 @@ import {
     TableCell,
     TableBody,
     TablePagination,
-    FormControl,
-    InputLabel,
-    Select,
-    MenuItem,
 } from '@mui/material';
 
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -34,14 +30,17 @@ import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Header from '../components/Header';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 /* converte qualquer formato de data vindo do Parse */
 const parseSaleDate = (d) => dayjs.utc(d?.iso ?? d).local();
 
-/* mescla resultados de vários meses */
-const mergeMonthlyReports = (arrays) => {
+/* mescla resultados de vários meses/anos */
+const mergeReports = (arrays) => {
     const merged = {};
     arrays.forEach((res) => {
+        if (!res) return;
         Object.entries(res).forEach(([name, rep]) => {
             if (merged[name]) {
                 merged[name].salesDetails.push(...rep.salesDetails);
@@ -53,26 +52,6 @@ const mergeMonthlyReports = (arrays) => {
     return merged;
 };
 
-/* gera lista de anos disponíveis (de 2024 até o ano atual) */
-const getAvailableYears = () => {
-    const currentYear = dayjs().year();
-    const startYear = 2024;
-    const years = [];
-    for (let y = currentYear; y >= startYear; y--) {
-        years.push(y);
-    }
-    return years;
-};
-
-/* calcula data fim padrão para um ano */
-const getDefaultEndDate = (year) => {
-    const currentYear = dayjs().year();
-    if (year < currentYear) {
-        return dayjs(`${year}-12-31`).endOf('day');
-    }
-    return dayjs().endOf('day');
-};
-
 const AdminReports = () => {
     const [reports, setReports] = useState({});
     const [filteredReports, setFilteredReports] = useState({});
@@ -80,19 +59,15 @@ const AdminReports = () => {
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
 
-    /* —— Seletor de ano —— */
-    const [selectedYear, setSelectedYear] = useState(dayjs().year());
-    const availableYears = useMemo(() => getAvailableYears(), []);
-
-    /* —— datas —— */
-    const [startDate, setStartDate] = useState(dayjs().startOf('year'));
+    /* —— datas: padrão = mês atual —— */
+    const [startDate, setStartDate] = useState(dayjs().startOf('month'));
     const [endDate, setEndDate] = useState(dayjs().endOf('day'));
 
     const [pageState, setPageState] = useState({});
     const navigate = useNavigate();
 
     /* ---------------- aplicar filtros ---------------- */
-    const applyFilters = (term, dIni, dFim, base) => {
+    const applyFilters = useCallback((term, dIni, dFim, base) => {
         console.log('[Reports] Aplicando filtros:', {
             termo: term,
             dataInicio: dIni?.format('DD/MM/YYYY'),
@@ -109,11 +84,9 @@ const AdminReports = () => {
             // Filtro por data
             const filteredSales = rep.salesDetails.filter((s) => {
                 const saleDate = parseSaleDate(s.saleDate);
-                const isInRange = saleDate.isBetween(dIni, dFim, 'day', '[]');
-                return isInRange;
+                return saleDate.isBetween(dIni, dFim, 'day', '[]');
             });
 
-            // Inclui se tem vendas no período OU se está buscando por nome específico
             if (filteredSales.length > 0) {
                 acc[name] = { ...rep, salesDetails: filteredSales };
             }
@@ -123,53 +96,72 @@ const AdminReports = () => {
 
         console.log('[Reports] Após filtros:', Object.keys(filtered).length, 'revendedores');
         setFilteredReports(filtered);
+    }, []);
+
+    /* ---------------- buscar dados de um ano/mês específico ---------------- */
+    const fetchYearMonthData = async (year, month, headers) => {
+        try {
+            const { data } = await api.post(
+                '/functions/gett-admin-reports',
+                { month, year },
+                { headers },
+            );
+            return data.result || {};
+        } catch (err) {
+            console.error(`[Reports] Erro no mês ${month}/${year}:`, err);
+            return {};
+        }
     };
 
-    /* ---------------- fetch de todos os meses do ano selecionado ---------------- */
-    const fetchReports = async (year, filterStartDate, filterEndDate) => {
+    /* ---------------- fetch baseado no range de datas ---------------- */
+    const fetchReports = useCallback(async (dIni, dFim) => {
         const sessionToken = localStorage.getItem('sessionToken');
-        if (!sessionToken) return setError('Sessão expirada. Faça login novamente.');
+        if (!sessionToken) {
+            setError('Sessão expirada. Faça login novamente.');
+            return;
+        }
 
         try {
             setLoading(true);
             setError('');
             const headers = { 'X-Parse-Session-Token': sessionToken };
 
-            const currentYear = dayjs().year();
-            const currentMonth = dayjs().month() + 1;
+            // Calcula quais anos/meses precisamos buscar
+            const startYear = dIni.year();
+            const startMonth = dIni.month() + 1; // 1-based
+            const endYear = dFim.year();
+            const endMonth = dFim.month() + 1;
 
-            // Se for o ano atual, busca até o mês atual; senão, busca todos os 12 meses
-            const maxMonth = year === currentYear ? currentMonth : 12;
-            const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
+            console.log(`[Reports] Buscando de ${startMonth}/${startYear} até ${endMonth}/${endYear}`);
 
-            console.log(`[Reports] Buscando dados de ${year}, meses 1 a ${maxMonth}`);
+            // Gera lista de todos os meses que precisamos buscar
+            const monthsToFetch = [];
+            let currentDate = dIni.startOf('month');
+            const lastDate = dFim.endOf('month');
 
-            /* faz todas as chamadas em paralelo */
+            while (currentDate.isBefore(lastDate) || currentDate.isSame(lastDate, 'month')) {
+                monthsToFetch.push({
+                    year: currentDate.year(),
+                    month: currentDate.month() + 1
+                });
+                currentDate = currentDate.add(1, 'month');
+            }
+
+            console.log('[Reports] Meses a buscar:', monthsToFetch);
+
+            // Busca todos os meses em paralelo
             const monthlyData = await Promise.all(
-                months.map(async (m) => {
-                    try {
-                        const { data } = await api.post(
-                            '/functions/gett-admin-reports',
-                            { month: m, year },
-                            { headers },
-                        );
-                        console.log(`[Reports] Mês ${m}/${year}:`, Object.keys(data.result || {}).length, 'revendedores');
-                        return data.result || {};
-                    } catch (err) {
-                        console.error(`[Reports] Erro no mês ${m}/${year}:`, err);
-                        return {};
-                    }
-                }),
+                monthsToFetch.map(({ year, month }) =>
+                    fetchYearMonthData(year, month, headers)
+                )
             );
 
-            /* junta tudo */
-            const merged = mergeMonthlyReports(monthlyData);
+            // Junta tudo
+            const merged = mergeReports(monthlyData);
             console.log('[Reports] Total revendedores encontrados:', Object.keys(merged).length);
 
             setReports(merged);
-
-            // Usa as datas passadas como parâmetro (não o state que pode estar desatualizado)
-            applyFilters(searchTerm, filterStartDate, filterEndDate, merged);
+            applyFilters(searchTerm, dIni, dFim, merged);
 
         } catch (err) {
             console.error(err);
@@ -177,42 +169,15 @@ const AdminReports = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [searchTerm, applyFilters]);
 
-    /* Atualiza quando o ano selecionado muda */
+    /* Carrega dados iniciais */
     useEffect(() => {
-        // Calcula as novas datas
-        const newStartDate = dayjs(`${selectedYear}-01-01`).startOf('day');
-        const newEndDate = getDefaultEndDate(selectedYear);
-
-        console.log('[Reports] Ano selecionado:', selectedYear);
-        console.log('[Reports] Período:', newStartDate.format('DD/MM/YYYY'), 'até', newEndDate.format('DD/MM/YYYY'));
-
-        // Atualiza o state das datas
-        setStartDate(newStartDate);
-        setEndDate(newEndDate);
-
-        // Passa as datas calculadas diretamente para o fetch (não depende do state)
-        fetchReports(selectedYear, newStartDate, newEndDate);
+        fetchReports(startDate, endDate);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedYear]);
-
-    /* ---------------- helpers ---------------- */
-    const calcTotals = (sales) =>
-        sales.reduce(
-            (tot, s) => {
-                tot.totalSales += s.quantitySold || 0;
-                tot.totalRevenue += s.totalPrice || 0;
-                return tot;
-            },
-            { totalSales: 0, totalRevenue: 0 },
-        );
+    }, []);
 
     /* ---------------- handlers ---------------- */
-    const handleYearChange = (e) => {
-        setSelectedYear(e.target.value);
-    };
-
     const handleSearch = (e) => {
         const term = e.target.value;
         setSearchTerm(term);
@@ -220,17 +185,33 @@ const AdminReports = () => {
     };
 
     const handleStartDateChange = (d) => {
-        const newStart = d ? d.startOf('day') : null;
+        if (!d) return;
+        const newStart = d.startOf('day');
         setStartDate(newStart);
-        if (newStart && endDate) {
+
+        // Se a nova data inicial é de um ano/mês diferente, rebusca os dados
+        const needsRefetch = newStart.year() !== startDate.year() ||
+            newStart.month() !== startDate.month();
+
+        if (needsRefetch) {
+            fetchReports(newStart, endDate);
+        } else {
             applyFilters(searchTerm, newStart, endDate, reports);
         }
     };
 
     const handleEndDateChange = (d) => {
-        const newEnd = d ? d.endOf('day') : null;
+        if (!d) return;
+        const newEnd = d.endOf('day');
         setEndDate(newEnd);
-        if (startDate && newEnd) {
+
+        // Se a nova data final é de um ano/mês diferente, rebusca os dados
+        const needsRefetch = newEnd.year() !== endDate.year() ||
+            newEnd.month() !== endDate.month();
+
+        if (needsRefetch) {
+            fetchReports(startDate, newEnd);
+        } else {
             applyFilters(searchTerm, startDate, newEnd, reports);
         }
     };
@@ -242,6 +223,17 @@ const AdminReports = () => {
 
     const handleChangeRowsPerPage = (id, n) =>
         setPageState((st) => ({ ...st, [id]: { page: 0, rowsPerPage: +n } }));
+
+    /* ---------------- helpers de cálculo ---------------- */
+    const calcTotals = (sales) =>
+        sales.reduce(
+            (tot, s) => {
+                tot.totalSales += s.quantitySold || 0;
+                tot.totalRevenue += s.totalPrice || 0;
+                return tot;
+            },
+            { totalSales: 0, totalRevenue: 0 },
+        );
 
     /* ordena por total de vendas no período */
     const sortedResellers = useMemo(
@@ -270,6 +262,51 @@ const AdminReports = () => {
         );
     }, [sortedResellers]);
 
+    /* ---------------- Exportar PDF ---------------- */
+    const handleGeneratePDF = () => {
+        if (sortedResellers.length === 0) return;
+
+        const doc = new jsPDF();
+        doc.text('Relatório de Vendas - Admin', 14, 20);
+        doc.setFontSize(10);
+        doc.text(`Período: ${startDate.format('DD/MM/YYYY')} até ${endDate.format('DD/MM/YYYY')}`, 14, 28);
+
+        let yPos = 40;
+
+        sortedResellers.forEach(({ name, rep, totalSales, totalRevenue }) => {
+            // Verifica se precisa de nova página
+            if (yPos > 250) {
+                doc.addPage();
+                yPos = 20;
+            }
+
+            doc.setFontSize(12);
+            doc.text(`${name} - Vendas: ${totalSales} | Receita: R$${totalRevenue.toFixed(2)}`, 14, yPos);
+            yPos += 8;
+
+            const tableColumn = ['Produto', 'Qtd', 'Preço', 'Data'];
+            const tableRows = rep.salesDetails.map((s) => [
+                s.productName,
+                s.quantitySold,
+                `R$${(s.totalPrice || 0).toFixed(2)}`,
+                parseSaleDate(s.saleDate).format('DD/MM/YYYY'),
+            ]);
+
+            doc.autoTable({
+                head: [tableColumn],
+                body: tableRows,
+                startY: yPos,
+                margin: { left: 14 },
+                styles: { fontSize: 8 },
+            });
+
+            yPos = doc.lastAutoTable.finalY + 15;
+        });
+
+        const fileName = `relatorio-admin-${startDate.format('DD-MM-YYYY')}-ate-${endDate.format('DD-MM-YYYY')}.pdf`;
+        doc.save(fileName);
+    };
+
     /* ---------------- UI ---------------- */
     return (
         <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -291,7 +328,7 @@ const AdminReports = () => {
                         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                             <CircularProgress />
                             <Typography variant="body2" color="textSecondary">
-                                Carregando dados de {selectedYear}...
+                                Carregando dados...
                             </Typography>
                         </Box>
                     ) : error ? (
@@ -300,29 +337,6 @@ const AdminReports = () => {
                         <Paper sx={{ p: 2, width: '100%', maxWidth: 900 }}>
                             {/* Filtros */}
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 3, alignItems: 'center' }}>
-                                {/* Seletor de Ano */}
-                                <FormControl sx={{ minWidth: 120 }}>
-                                    <InputLabel id="year-select-label">Ano</InputLabel>
-                                    <Select
-                                        labelId="year-select-label"
-                                        value={selectedYear}
-                                        label="Ano"
-                                        onChange={handleYearChange}
-                                    >
-                                        {availableYears.map((year) => (
-                                            <MenuItem key={year} value={year}>
-                                                {year}
-                                            </MenuItem>
-                                        ))}
-                                    </Select>
-                                </FormControl>
-
-                                <TextField
-                                    sx={{ flex: 1, minWidth: 200 }}
-                                    label="Buscar Revendedor"
-                                    value={searchTerm}
-                                    onChange={handleSearch}
-                                />
                                 <DatePicker
                                     label="Data Início"
                                     value={startDate}
@@ -335,6 +349,20 @@ const AdminReports = () => {
                                     onChange={handleEndDateChange}
                                     format="DD/MM/YYYY"
                                 />
+                                <TextField
+                                    sx={{ flex: 1, minWidth: 200 }}
+                                    label="Buscar Revendedor"
+                                    value={searchTerm}
+                                    onChange={handleSearch}
+                                />
+                                <Button
+                                    variant="contained"
+                                    color="primary"
+                                    onClick={handleGeneratePDF}
+                                    disabled={sortedResellers.length === 0}
+                                >
+                                    Exportar PDF
+                                </Button>
                             </Box>
 
                             {/* Resumo Geral */}
@@ -379,7 +407,7 @@ const AdminReports = () => {
                             {/* Lista vazia */}
                             {sortedResellers.length === 0 && (
                                 <Alert severity="info" sx={{ mb: 3 }}>
-                                    Nenhuma venda encontrada para o período selecionado em {selectedYear}.
+                                    Nenhuma venda encontrada para o período de {startDate.format('DD/MM/YYYY')} até {endDate.format('DD/MM/YYYY')}.
                                 </Alert>
                             )}
 
